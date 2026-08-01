@@ -1,5 +1,5 @@
 require("dotenv").config();
-
+const authRoutes = require("./routes/auth.routes");
 const express     = require("express");
 const multer      = require("multer");
 const cors        = require("cors");
@@ -75,6 +75,7 @@ app.use(cors({
 app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/admin", adminRoutes);
+app.use("/api/auth", authRoutes);
 
 /* ── UPLOADS DIR ── */
 const uploadDir = path.join(__dirname, "uploads");

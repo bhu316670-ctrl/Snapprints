@@ -209,6 +209,193 @@ exports.createMachine = async (req, res) => {
     });
   }
 };
+
+/* ===========================
+   UPDATE MACHINE
+=========================== */
+
+exports.updateMachine = async (req, res) => {
+  try {
+
+    const { machineId } = req.params;
+
+    const {
+      name,
+      locationName,
+      address,
+      city,
+      state,
+      pincode,
+      latitude,
+      longitude,
+    } = req.body;
+
+    const [[machine]] = await db.query(
+      `
+      SELECT location_id
+      FROM machines
+      WHERE machine_id = ?
+      `,
+      [machineId]
+    );
+
+    if (!machine) {
+      return res.status(404).json({
+        success: false,
+        message: "Machine not found",
+      });
+    }
+
+    await db.query(
+      `
+      UPDATE locations
+      SET
+        name = ?,
+        address = ?,
+        city = ?,
+        state = ?,
+        pincode = ?,
+        latitude = ?,
+        longitude = ?
+      WHERE id = ?
+      `,
+      [
+        locationName,
+        address,
+        city,
+        state,
+        pincode,
+        latitude || null,
+        longitude || null,
+        machine.location_id,
+      ]
+    );
+
+    await db.query(
+      `
+      UPDATE machines
+      SET
+        name = ?
+      WHERE machine_id = ?
+      `,
+      [
+        name,
+        machineId,
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: "Machine updated successfully",
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to update machine",
+    });
+
+  }
+};
+
+/* ===========================
+   DELETE MACHINE
+=========================== */
+
+exports.deleteMachine = async (req, res) => {
+
+  const connection = await db.getConnection();
+
+  try {
+
+    await connection.beginTransaction();
+
+    const { machineId } = req.params;
+
+    const [[machine]] = await connection.query(
+      `
+      SELECT location_id
+      FROM machines
+      WHERE machine_id=?
+      `,
+      [machineId]
+    );
+
+    if (!machine) {
+
+      await connection.rollback();
+
+      return res.status(404).json({
+        success: false,
+        message: "Machine not found",
+      });
+
+    }
+
+    const [[jobs]] = await connection.query(
+      `
+      SELECT COUNT(*) total
+      FROM print_jobs
+      WHERE machine_id=?
+      `,
+      [machineId]
+    );
+
+    if (jobs.total > 0) {
+
+      await connection.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Cannot delete machine because print jobs exist.",
+      });
+
+    }
+
+    await connection.query(
+      `
+      DELETE FROM machines
+      WHERE machine_id=?
+      `,
+      [machineId]
+    );
+
+    await connection.query(
+      `
+      DELETE FROM locations
+      WHERE id=?
+      `,
+      [machine.location_id]
+    );
+
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: "Machine deleted successfully",
+    });
+
+  } catch (err) {
+
+    await connection.rollback();
+
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: "Delete failed",
+    });
+
+  } finally {
+
+    connection.release();
+
+  }
+};
 /* ===========================
    MACHINES LIST
 =========================== */
@@ -267,19 +454,54 @@ exports.getLiveJobs = async (req, res) => {
 =========================== */
 exports.getRevenue = async (req, res) => {
   try {
+    const { period = "week" } = req.query;
+
+    let condition = "";
+
+    switch (period) {
+      case "today":
+        condition = "DATE(created_at)=CURDATE()";
+        break;
+
+      case "week":
+        condition = "created_at >= CURDATE() - INTERVAL 6 DAY";
+        break;
+
+      case "month":
+        condition = "created_at >= CURDATE() - INTERVAL 30 DAY";
+        break;
+
+      case "year":
+        condition = "created_at >= CURDATE() - INTERVAL 12 MONTH";
+        break;
+
+      default:
+        condition = "created_at >= CURDATE() - INTERVAL 6 DAY";
+    }
+
     const [rows] = await db.query(`
-      SELECT DATE(created_at) as day,
-             SUM(amount) as revenue
+      SELECT
+        DATE(created_at) AS day,
+        SUM(amount) AS revenue
       FROM print_jobs
-      WHERE status='PRINTED'
+      WHERE
+        status='PRINTED'
+        AND ${condition}
       GROUP BY DATE(created_at)
-      ORDER BY day DESC
-      LIMIT 7
+      ORDER BY day ASC
     `);
+
     res.json(rows);
+
   } catch (err) {
+
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch revenue" });
+
+    res.status(500).json({
+      success:false,
+      message:"Revenue fetch failed"
+    });
+
   }
 };
 

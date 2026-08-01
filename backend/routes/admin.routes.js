@@ -17,6 +17,10 @@ router.get("/revenue", admin.getRevenue);
 
 router.get("/machineinfo", admin.getMachineInfo)
 
-router.get("/machine-report/:machineId", admin.machineReport)
+router.get("/machine-report/:machineId", admin.machineReport);
+
+router.put("/machines/:machineId", admin.updateMachine);
+
+router.delete("/machines/:machineId", admin.deleteMachine);
 
 module.exports = router;
