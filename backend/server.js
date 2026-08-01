@@ -42,7 +42,7 @@ if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
 }
 
 // const SERVER_API_BASE = process.env.REACT_APP_API_BASE || "http://localhost:5000/api";
-const SERVER_API_BASE =process.env.API_BASE_URL || "https://snapprints-production.up.railway.app/api";
+const SERVER_API_BASE =process.env.API_BASE_URL || "https://snapprints-production-b39c.up.railway.app/api";
 
 /* ── SOCKET.IO ── */
 initSocket(server);
@@ -51,6 +51,7 @@ initSocket(server);
 const allowedOrigins = [
   "https://www.snapprints.in",
   "https://snapprints.in",
+  "https://snap-prints.vercel.app"
 ];
 
 app.use(cors({

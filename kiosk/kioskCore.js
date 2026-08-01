@@ -18,7 +18,7 @@ const PROJECT_ROOT = IS_PI
   ? "/home/pi/kiosk"
   : path.resolve(__dirname);
 
-const FALLBACK_API_BASE  = "https://snapprints-production.up.railway.app/api";
+const FALLBACK_API_BASE  = "https://snapprints-production-b39c.up.railway.app/api";
 const CONFIG_FILE        = path.join(PROJECT_ROOT, "config.json");
 const DOWNLOAD_DIR       = path.join(PROJECT_ROOT, "kiosk", "files");
 const CACHE_FILE         = path.join(PROJECT_ROOT, "kiosk", "jobs.json");
