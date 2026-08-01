@@ -434,108 +434,439 @@ app.post("/api/create-payment", async (req, res) => {
 /* ═══════════════════════════════════════════════════════════
    VERIFY PAYMENT
 ═══════════════════════════════════════════════════════════ */
+// app.post("/api/verify-payment", async (req, res) => {
+//   const connection = await db.getConnection();
+//   let txStarted = false;
+//   try {
+//     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+//     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature)
+//       return res.status(400).json({ error: "Missing payment fields" });
+
+//     const expected = crypto
+//       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+//       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+//       .digest("hex");
+//     if (expected !== razorpay_signature) return res.status(400).json({ error: "Invalid signature" });
+
+//     await connection.beginTransaction(); txStarted = true;
+//     const [rows] = await connection.query(
+//       `SELECT * FROM print_jobs WHERE payment_order_id=? FOR UPDATE`, [razorpay_order_id]
+//     );
+//     if (!rows.length) { await connection.rollback(); return res.status(400).json({ error: "Job not found" }); }
+//     const job = rows[0];
+//     if (job.status !== "PAYING") { await connection.rollback(); return res.status(409).json({ error: "Already processed" }); }
+
+//     const otp = generateOTP(), qr = generateQrToken(), expiry = new Date(Date.now() + 5 * 60 * 1000);
+//     await connection.query(
+//       `UPDATE print_jobs SET status='PAID', payment_id=?, otp=?, otp_expires_at=?, qr_token=?, qr_expires_at=?, otp_verified=0 WHERE id=?`,
+//       [razorpay_payment_id, otp, expiry, qr, expiry, job.id]
+//     );
+//     getIO().emit("payment_success", { jobId: job.job_id, machineId: job.machine_id, filePath: job.file_path });
+//     await connection.commit();
+//     res.json({ success: true, otp, qrToken: qr });
+//   } catch (err) {
+//     if (txStarted) await connection.rollback();
+//     console.error("VERIFY PAYMENT ERROR:", err);
+//     res.status(500).json({ error: "Payment verification failed" });
+//   } finally { connection.release(); }
+// });
+/* ═══════════════════════════════════════════════════════════
+   VERIFY PAYMENT
+═══════════════════════════════════════════════════════════ */
 app.post("/api/verify-payment", async (req, res) => {
   const connection = await db.getConnection();
   let txStarted = false;
+
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature)
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+    } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({ error: "Missing payment fields" });
+    }
 
     const expected = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
-    if (expected !== razorpay_signature) return res.status(400).json({ error: "Invalid signature" });
 
-    await connection.beginTransaction(); txStarted = true;
+    if (expected !== razorpay_signature) {
+      return res.status(400).json({ error: "Invalid signature" });
+    }
+
+    await connection.beginTransaction();
+    txStarted = true;
+
     const [rows] = await connection.query(
-      `SELECT * FROM print_jobs WHERE payment_order_id=? FOR UPDATE`, [razorpay_order_id]
+      `SELECT * FROM print_jobs
+       WHERE payment_order_id=?
+       FOR UPDATE`,
+      [razorpay_order_id]
     );
-    if (!rows.length) { await connection.rollback(); return res.status(400).json({ error: "Job not found" }); }
-    const job = rows[0];
-    if (job.status !== "PAYING") { await connection.rollback(); return res.status(409).json({ error: "Already processed" }); }
 
-    const otp = generateOTP(), qr = generateQrToken(), expiry = new Date(Date.now() + 5 * 60 * 1000);
+    if (!rows.length) {
+      await connection.rollback();
+      return res.status(400).json({ error: "Job not found" });
+    }
+
+    const job = rows[0];
+
+    if (job.status !== "PAYING") {
+      await connection.rollback();
+      return res.status(409).json({ error: "Already processed" });
+    }
+
+    const otp = generateOTP();
+    const qr = generateQrToken();
+    const expiry = new Date(Date.now() + 5 * 60 * 1000);
+
+    // Update print job
     await connection.query(
-      `UPDATE print_jobs SET status='PAID', payment_id=?, otp=?, otp_expires_at=?, qr_token=?, qr_expires_at=?, otp_verified=0 WHERE id=?`,
-      [razorpay_payment_id, otp, expiry, qr, expiry, job.id]
+      `UPDATE print_jobs
+       SET status='PAID',
+           payment_id=?
+       WHERE id=?`,
+      [razorpay_payment_id, job.id]
     );
-    getIO().emit("payment_success", { jobId: job.job_id, machineId: job.machine_id, filePath: job.file_path });
+
+    // Store OTP & QR
+    await connection.query(
+      `INSERT INTO print_job_tokens
+      (
+        job_id,
+        otp,
+        otp_verified,
+        otp_expires_at,
+        qr_token,
+        qr_expires_at
+      )
+      VALUES (?, ?, 0, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+      otp=VALUES(otp),
+      otp_verified=0,
+      otp_expires_at=VALUES(otp_expires_at),
+      qr_token=VALUES(qr_token),
+      qr_expires_at=VALUES(qr_expires_at)`,
+      [
+        job.job_id,
+        otp,
+        expiry,
+        qr,
+        expiry,
+      ]
+    );
+
+    getIO().emit("payment_success", {
+      jobId: job.job_id,
+      machineId: job.machine_id,
+      filePath: job.file_path,
+    });
+
     await connection.commit();
-    res.json({ success: true, otp, qrToken: qr });
+
+    return res.json({
+      success: true,
+      otp,
+      qrToken: qr,
+    });
+
   } catch (err) {
-    if (txStarted) await connection.rollback();
+
+    if (txStarted) {
+      await connection.rollback();
+    }
+
     console.error("VERIFY PAYMENT ERROR:", err);
-    res.status(500).json({ error: "Payment verification failed" });
-  } finally { connection.release(); }
+
+    return res.status(500).json({
+      error: "Payment verification failed",
+    });
+
+  } finally {
+
+    connection.release();
+
+  }
 });
+/* ═══════════════════════════════════════════════════════════
+   KIOSK UNLOCK
+═══════════════════════════════════════════════════════════ */
+// app.post("/api/kiosk/unlock", verifyMachine, async (req, res) => {
+//   const connection = await db.getConnection();
+//   try {
+//     const { otp, qrToken } = req.body;
+//     const machineId = req.machine.machine_id;
+//     await connection.beginTransaction();
+//     const now = new Date();
+//     const [rows] = await connection.query(
+//       `SELECT * FROM print_jobs
+//        WHERE machine_id=? AND status='PAID' AND otp_verified=0
+//          AND ((otp IS NOT NULL AND otp=? AND otp_expires_at>?)
+//            OR (qr_token IS NOT NULL AND qr_token=? AND qr_expires_at>?))
+//        FOR UPDATE`,
+//       [machineId, otp || null, now, qrToken || null, now]
+//     );
+//     if (!rows.length) {
+//       await connection.rollback();
+//       await logAudit(machineId, null, "UNLOCK_FAILED", { otp, qrToken });
+//       return res.status(401).json({ error: "Invalid or expired OTP / QR" });
+//     }
+//     const job = rows[0];
+//     await connection.query(`UPDATE print_jobs SET status='PRINTING', otp_verified=1 WHERE id=?`, [job.id]);
+//     await connection.commit();
+//     await logAudit(machineId, job.job_id, "JOB_UNLOCKED");
+//     return res.json({
+//       jobId: job.job_id, filePath: job.file_path, copies: job.copies,
+//       color: job.color, paperSize: job.paper_size, printSide: job.print_side,
+//     });
+//   } catch (err) {
+//     await connection.rollback();
+//     console.error("KIOSK UNLOCK ERROR:", err);
+//     return res.status(500).json({ error: "Internal server error" });
+//   } finally { connection.release(); }
+// });
 
 /* ═══════════════════════════════════════════════════════════
    KIOSK UNLOCK
 ═══════════════════════════════════════════════════════════ */
 app.post("/api/kiosk/unlock", verifyMachine, async (req, res) => {
+
   const connection = await db.getConnection();
+
   try {
+
     const { otp, qrToken } = req.body;
     const machineId = req.machine.machine_id;
+
     await connection.beginTransaction();
+
     const now = new Date();
+
     const [rows] = await connection.query(
-      `SELECT * FROM print_jobs
-       WHERE machine_id=? AND status='PAID' AND otp_verified=0
-         AND ((otp IS NOT NULL AND otp=? AND otp_expires_at>?)
-           OR (qr_token IS NOT NULL AND qr_token=? AND qr_expires_at>?))
-       FOR UPDATE`,
-      [machineId, otp || null, now, qrToken || null, now]
+      `
+      SELECT
+          pj.*,
+          pjt.otp,
+          pjt.otp_verified,
+          pjt.otp_expires_at,
+          pjt.qr_token,
+          pjt.qr_expires_at
+
+      FROM print_jobs pj
+
+      INNER JOIN print_job_tokens pjt
+      ON pj.job_id = pjt.job_id
+
+      WHERE
+          pj.machine_id=?
+      AND pj.status='PAID'
+      AND pjt.otp_verified=0
+      AND
+      (
+          (
+              pjt.otp IS NOT NULL
+              AND pjt.otp=?
+              AND pjt.otp_expires_at>?
+          )
+
+          OR
+
+          (
+              pjt.qr_token IS NOT NULL
+              AND pjt.qr_token=?
+              AND pjt.qr_expires_at>?
+          )
+      )
+
+      FOR UPDATE
+      `,
+      [
+        machineId,
+        otp || null,
+        now,
+        qrToken || null,
+        now
+      ]
     );
+
     if (!rows.length) {
+
       await connection.rollback();
-      await logAudit(machineId, null, "UNLOCK_FAILED", { otp, qrToken });
-      return res.status(401).json({ error: "Invalid or expired OTP / QR" });
+
+      await logAudit(
+        machineId,
+        null,
+        "UNLOCK_FAILED",
+        { otp, qrToken }
+      );
+
+      return res.status(401).json({
+        error: "Invalid or expired OTP / QR"
+      });
+
     }
+
     const job = rows[0];
-    await connection.query(`UPDATE print_jobs SET status='PRINTING', otp_verified=1 WHERE id=?`, [job.id]);
+
+    await connection.query(
+      `UPDATE print_jobs
+       SET status='PRINTING'
+       WHERE id=?`,
+      [job.id]
+    );
+
+    await connection.query(
+      `UPDATE print_job_tokens
+       SET otp_verified=1
+       WHERE job_id=?`,
+      [job.job_id]
+    );
+
     await connection.commit();
+
     await logAudit(machineId, job.job_id, "JOB_UNLOCKED");
+
     return res.json({
-      jobId: job.job_id, filePath: job.file_path, copies: job.copies,
-      color: job.color, paperSize: job.paper_size, printSide: job.print_side,
+      jobId: job.job_id,
+      filePath: job.file_path,
+      copies: job.copies,
+      color: job.color,
+      paperSize: job.paper_size,
+      printSide: job.print_side,
     });
+
   } catch (err) {
+
     await connection.rollback();
+
     console.error("KIOSK UNLOCK ERROR:", err);
-    return res.status(500).json({ error: "Internal server error" });
-  } finally { connection.release(); }
+
+    return res.status(500).json({
+      error: "Internal server error"
+    });
+
+  } finally {
+
+    connection.release();
+
+  }
+
 });
+/* ═══════════════════════════════════════════════════════════
+   MARK PRINTED
+═══════════════════════════════════════════════════════════ */
+// app.post("/api/kiosk/mark-printed", verifyMachine, async (req, res) => {
+//   try {
+//     const { jobId } = req.body;
+//     const machineId = req.machine.machine_id;
+//     if (!jobId) return res.status(400).json({ error: "Job ID required" });
+//     const [[job]] = await db.query(`SELECT file_path, status FROM print_jobs WHERE job_id=?`, [jobId]);
+//     if (!job)              return res.status(404).json({ error: "Job not found" });
+//     if (job.status !== "PRINTING") return res.status(400).json({ error: "Invalid job state" });
+//     const [r] = await db.query(
+//       `UPDATE print_jobs SET status='PRINTED', printed_at=NOW() WHERE job_id=? AND status='PRINTING'`, [jobId]
+//     );
+//     if (!r.affectedRows) return res.status(404).json({ error: "State transition failed" });
+//     await logAudit(machineId, jobId, "JOB_PRINTED");
+//     if (job.file_path && fs.existsSync(job.file_path)) {
+//       try { fs.unlinkSync(job.file_path); } catch (e) { console.error("FILE DELETE:", e.message); }
+//     }
+//     getIO().emit("job_printed", { jobId });
+//     res.json({ success: true });
+//   } catch (err) {
+//     console.error("MARK PRINTED ERROR:", err);
+//     res.status(500).json({ error: "Internal server error" });
+//   }
+// });
 
 /* ═══════════════════════════════════════════════════════════
    MARK PRINTED
 ═══════════════════════════════════════════════════════════ */
 app.post("/api/kiosk/mark-printed", verifyMachine, async (req, res) => {
+
   try {
+
     const { jobId } = req.body;
     const machineId = req.machine.machine_id;
-    if (!jobId) return res.status(400).json({ error: "Job ID required" });
-    const [[job]] = await db.query(`SELECT file_path, status FROM print_jobs WHERE job_id=?`, [jobId]);
-    if (!job)              return res.status(404).json({ error: "Job not found" });
-    if (job.status !== "PRINTING") return res.status(400).json({ error: "Invalid job state" });
-    const [r] = await db.query(
-      `UPDATE print_jobs SET status='PRINTED', printed_at=NOW() WHERE job_id=? AND status='PRINTING'`, [jobId]
-    );
-    if (!r.affectedRows) return res.status(404).json({ error: "State transition failed" });
-    await logAudit(machineId, jobId, "JOB_PRINTED");
-    if (job.file_path && fs.existsSync(job.file_path)) {
-      try { fs.unlinkSync(job.file_path); } catch (e) { console.error("FILE DELETE:", e.message); }
-    }
-    getIO().emit("job_printed", { jobId });
-    res.json({ success: true });
-  } catch (err) {
-    console.error("MARK PRINTED ERROR:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
 
+    if (!jobId) {
+      return res.status(400).json({ error: "Job ID required" });
+    }
+
+    const [[job]] = await db.query(
+      `SELECT file_path, status
+       FROM print_jobs
+       WHERE job_id=?`,
+      [jobId]
+    );
+
+    if (!job) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+
+    if (job.status !== "PRINTING") {
+      return res.status(400).json({ error: "Invalid job state" });
+    }
+
+    const [result] = await db.query(
+      `UPDATE print_jobs
+       SET status='PRINTED',
+           printed_at=NOW()
+       WHERE job_id=?
+       AND status='PRINTING'`,
+      [jobId]
+    );
+
+    if (!result.affectedRows) {
+      return res.status(404).json({
+        error: "State transition failed"
+      });
+    }
+
+    // Delete OTP / QR token after successful print
+    await db.query(
+      `DELETE FROM print_job_tokens
+       WHERE job_id=?`,
+      [jobId]
+    );
+
+    await logAudit(
+      machineId,
+      jobId,
+      "JOB_PRINTED"
+    );
+
+    // Delete uploaded file
+    if (job.file_path && fs.existsSync(job.file_path)) {
+      try {
+        fs.unlinkSync(job.file_path);
+      } catch (e) {
+        console.error("FILE DELETE:", e.message);
+      }
+    }
+
+    getIO().emit("job_printed", {
+      jobId
+    });
+
+    return res.json({
+      success: true
+    });
+
+  } catch (err) {
+
+    console.error("MARK PRINTED ERROR:", err);
+
+    return res.status(500).json({
+      error: "Internal server error"
+    });
+
+  }
+
+});
 /* ═══════════════════════════════════════════════════════════
    MARK FAILED
 ═══════════════════════════════════════════════════════════ */
@@ -579,20 +910,60 @@ app.get("/api/job-status/:jobId", async (req, res) => {
 /* ═══════════════════════════════════════════════════════════
    PENDING JOBS
 ═══════════════════════════════════════════════════════════ */
+// app.get("/api/kiosk/pending-jobs", verifyMachine, async (req, res) => {
+//   try {
+//     const [jobs] = await db.query(
+//       `SELECT job_id, file_path FROM print_jobs
+//        WHERE machine_id=? AND status='PAID' AND otp_verified=0 AND otp_expires_at>NOW()`,
+//       [req.machine.machine_id]
+//     );
+//     res.json({ jobs });
+//   } catch (err) {
+//     console.error("PENDING JOBS ERROR:", err);
+//     res.status(500).json({ error: "Internal server error" });
+//   }
+// });
+
+/* ═══════════════════════════════════════════════════════════
+   PENDING JOBS
+═══════════════════════════════════════════════════════════ */
 app.get("/api/kiosk/pending-jobs", verifyMachine, async (req, res) => {
+
   try {
+
     const [jobs] = await db.query(
-      `SELECT job_id, file_path FROM print_jobs
-       WHERE machine_id=? AND status='PAID' AND otp_verified=0 AND otp_expires_at>NOW()`,
+      `
+      SELECT
+          pj.job_id,
+          pj.file_path
+
+      FROM print_jobs pj
+
+      INNER JOIN print_job_tokens pjt
+      ON pj.job_id = pjt.job_id
+
+      WHERE
+          pj.machine_id=?
+      AND pj.status='PAID'
+      AND pjt.otp_verified=0
+      AND pjt.otp_expires_at > NOW()
+      `,
       [req.machine.machine_id]
     );
-    res.json({ jobs });
-  } catch (err) {
-    console.error("PENDING JOBS ERROR:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
 
+    res.json({ jobs });
+
+  } catch (err) {
+
+    console.error("PENDING JOBS ERROR:", err);
+
+    res.status(500).json({
+      error: "Internal server error"
+    });
+
+  }
+
+});
 /* ═══════════════════════════════════════════════════════════
    REGISTER MACHINE
 ═══════════════════════════════════════════════════════════ */
@@ -675,7 +1046,21 @@ cron.schedule("*/5 * * * *", async () => {
     await db.query(`DELETE FROM print_jobs WHERE status='CREATED' AND created_at < NOW() - INTERVAL 30 MINUTE`);
 
     console.log("STEP 2");
-    await db.query(`UPDATE print_jobs SET status='EXPIRED' WHERE status='PAID' AND otp_expires_at < NOW()`);
+
+await db.query(`
+UPDATE print_jobs pj
+INNER JOIN print_job_tokens pjt
+ON pj.job_id=pjt.job_id
+SET pj.status='EXPIRED'
+WHERE
+pj.status='PAID'
+AND pjt.otp_expires_at < NOW()
+`);
+
+await db.query(`
+DELETE FROM print_job_tokens
+WHERE otp_expires_at < NOW()
+`);
 
     console.log("STEP 3");
     await db.query(`DELETE FROM print_jobs WHERE status='PRINTED' AND created_at < NOW() - INTERVAL 1 DAY`);
