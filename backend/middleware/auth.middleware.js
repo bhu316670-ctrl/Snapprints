@@ -2,16 +2,21 @@ const db = require("../database/db");
 const { verifyToken } = require("../utils/jwt");
 
 /**
- * Authenticate User/Admin
+ * Authentication
  */
+
 exports.authenticate = async (req, res, next) => {
   try {
+
     const authHeader = req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (
+      !authHeader ||
+      !authHeader.startsWith("Bearer ")
+    ) {
       return res.status(401).json({
         success: false,
-        message: "Authorization token missing",
+        message: "Unauthorized",
       });
     }
 
@@ -19,112 +24,113 @@ exports.authenticate = async (req, res, next) => {
 
     const payload = verifyToken(token);
 
-    let user = null;
+    /**
+     * ADMIN
+     */
 
-    // -----------------------------
-    // Admin
-    // -----------------------------
     if (payload.type === "ADMIN") {
+
       const [rows] = await db.query(
         `
         SELECT
-          id,
-          name,
-          email,
-          role,
-          is_active
+            id,
+            name,
+            email
         FROM admin_users
-        WHERE id = ?
+        WHERE id=?
+        AND is_active=1
         LIMIT 1
         `,
         [payload.id]
       );
 
-      if (!rows.length || !rows[0].is_active) {
+      if (!rows.length) {
         return res.status(401).json({
           success: false,
-          message: "Admin account not found",
+          message: "Unauthorized",
         });
       }
 
-      user = {
+      req.user = {
         ...rows[0],
         type: "ADMIN",
       };
+
+      return next();
     }
 
-    // -----------------------------
-    // User
-    // -----------------------------
-    else if (payload.type === "USER") {
+    /**
+     * USER
+     */
+
+    if (payload.type === "USER") {
+
       const [rows] = await db.query(
         `
         SELECT
-          id,
-          full_name,
-          email,
-          is_active
+            id,
+            full_name,
+            email,
+            phone
         FROM users
-        WHERE id = ?
+        WHERE id=?
+        AND status='ACTIVE'
         LIMIT 1
         `,
         [payload.id]
       );
 
-      if (!rows.length || !rows[0].is_active) {
+      if (!rows.length) {
         return res.status(401).json({
           success: false,
-          message: "User account not found",
+          message: "Unauthorized",
         });
       }
 
-      user = {
+      req.user = {
         ...rows[0],
         type: "USER",
       };
+
+      return next();
     }
-
-    else {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid token",
-      });
-    }
-
-    req.user = user;
-
-    next();
-
-  } catch (err) {
-    console.error("AUTH ERROR:", err);
 
     return res.status(401).json({
       success: false,
       message: "Unauthorized",
     });
+
+  } catch (err) {
+
+    console.error(err);
+
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized",
+    });
+
   }
 };
 
 /**
- * Restrict Admin Roles
+ * ADMIN ONLY
  */
-exports.authorize = (...roles) => {
-  return (req, res, next) => {
 
-    if (!req.user || req.user.type !== "ADMIN") {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied",
-      });
-    }
+exports.authorizeAdmin = (req, res, next) => {
 
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: "Insufficient permissions",
-      });
-    }
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized",
+    });
+  }
 
-    next();
-  };
+  if (req.user.type !== "ADMIN") {
+    return res.status(403).json({
+      success: false,
+      message: "Access denied",
+    });
+  }
+
+  next();
 };

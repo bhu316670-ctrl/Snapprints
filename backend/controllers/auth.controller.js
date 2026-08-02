@@ -4,23 +4,16 @@ const db = require("../database/db");
 const { generateToken } = require("../utils/jwt");
 
 /**
- * Shared Login Function
+ * Shared Login
  */
 async function login({
   table,
-  emailColumn = "email",
-  passwordColumn = "password_hash",
   email,
   password,
   type,
 }) {
   const [rows] = await db.query(
-    `
-    SELECT *
-    FROM ${table}
-    WHERE ${emailColumn} = ?
-    LIMIT 1
-    `,
+    `SELECT * FROM ${table} WHERE email=? LIMIT 1`,
     [email]
   );
 
@@ -30,114 +23,147 @@ async function login({
 
   const user = rows[0];
 
-  if (!user.is_active) {
-    throw new Error("Account has been disabled");
+  /**
+   * Account Status
+   */
+
+  if (type === "ADMIN") {
+    if (!user.is_active) {
+      throw new Error("Account disabled");
+    }
   }
 
-  const validPassword = await bcrypt.compare(
+  if (type === "USER") {
+    if (user.status !== "ACTIVE") {
+      throw new Error("Account disabled");
+    }
+  }
+
+  /**
+   * Password
+   */
+
+  const valid = await bcrypt.compare(
     password,
-    user[passwordColumn]
+    user.password_hash
   );
 
-  if (!validPassword) {
+  if (!valid) {
     throw new Error("Invalid email or password");
   }
 
-  const payload = {
+  /**
+   * JWT
+   */
+
+  const token = generateToken({
     id: user.id,
     type,
-  };
+  });
 
-  if (type === "ADMIN") {
-    payload.role = user.role;
-  }
+  /**
+   * Response User
+   */
 
-  const token = generateToken(payload);
-
-  delete user[passwordColumn];
+  const responseUser =
+    type === "ADMIN"
+      ? {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          type: "ADMIN",
+        }
+      : {
+          id: user.id,
+          full_name: user.full_name,
+          email: user.email,
+          phone: user.phone,
+          type: "USER",
+        };
 
   return {
     token,
-    user,
+    user: responseUser,
   };
 }
 
-/* =====================================
-   ADMIN LOGIN
-===================================== */
+/**
+ * Admin Login
+ */
 
 exports.adminLogin = async (req, res) => {
   try {
-    const { email, password } = req.body;
-
     const result = await login({
       table: "admin_users",
-      email,
-      password,
+      email: req.body.email,
+      password: req.body.password,
       type: "ADMIN",
     });
 
-    return res.json({
+    res.json({
       success: true,
-      message: "Admin login successful",
+      message: "Login successful",
       ...result,
     });
 
   } catch (err) {
-    return res.status(401).json({
+
+    res.status(401).json({
       success: false,
       message: err.message,
     });
+
   }
 };
 
-/* =====================================
-   USER LOGIN
-===================================== */
+/**
+ * User Login
+ */
 
 exports.userLogin = async (req, res) => {
   try {
-    const { email, password } = req.body;
 
     const result = await login({
       table: "users",
-      email,
-      password,
+      email: req.body.email,
+      password: req.body.password,
       type: "USER",
     });
 
-    return res.json({
+    res.json({
       success: true,
-      message: "User login successful",
+      message: "Login successful",
       ...result,
     });
 
   } catch (err) {
-    return res.status(401).json({
+
+    res.status(401).json({
       success: false,
       message: err.message,
     });
+
   }
 };
 
-/* =====================================
-   CURRENT USER
-===================================== */
+/**
+ * Current User
+ */
 
 exports.me = async (req, res) => {
-  return res.json({
+  res.json({
     success: true,
     user: req.user,
   });
 };
 
-/* =====================================
-   LOGOUT
-===================================== */
+/**
+ * Logout
+ */
 
 exports.logout = async (req, res) => {
-  return res.json({
+  res.json({
     success: true,
-    message: "Logged out successfully",
+    message: "Logged out",
   });
 };
