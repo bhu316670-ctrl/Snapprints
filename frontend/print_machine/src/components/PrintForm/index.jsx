@@ -5,7 +5,8 @@ import "./PrintForm.css";
 import { useMachineStatus } from "./hooks/useMachineStatus";
 import { usePrintJob }      from "./hooks/usePrintJob";
 import { STEPS }            from "./constants";
-
+import { useAuth } from "./hooks/useAuth";
+import StepAuth from "./steps/StepAuth";
 import StepUpload  from "./steps/StepUpload";
 import StepSummary from "./steps/StepSummary";
 import StepOTP     from "./steps/StepOTP";
@@ -24,7 +25,7 @@ export default function PrintForm() {
     isLocked,
     isOnline,
   } = useMachineStatus();
-
+const auth = useAuth();
   const {
     color, setColor,
     copies, setCopies,
@@ -58,7 +59,7 @@ export default function PrintForm() {
             <p>Print Anytime Print Anywhere</p>
           </div>
         </div>
-        <div className="pf-card">
+        {/* <div className="pf-card">
           <div className="pf-body" style={{ textAlign: "center", padding: "32px 20px" }}>
             <div style={{ fontSize: 44, marginBottom: 14 }}>🔗</div>
             <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, color: "var(--ink)" }}>
@@ -86,7 +87,100 @@ export default function PrintForm() {
             </p>
           </div>
           <div className="pf-footer">SnapPrints v1.0</div>
+        </div> */}
+        <div className="pf-card">
+
+  {!auth.isAuthenticated ? (
+    <div className="pf-body">
+      <StepAuth {...auth} />
+    </div>
+  ) : (
+    <>
+      {/* STEP INDICATOR */}
+      <div className="pf-steps">
+        {STEPS.map((s) => (
+          <div
+            key={s.id}
+            className={`pf-step ${
+              currentStep === s.id ? "active" : currentStep > s.id ? "done" : ""
+            }`}
+          >
+            <div className="pf-step-num">
+              {currentStep > s.id ? "✓" : s.id}
+            </div>
+            <span className="pf-step-label">{s.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* BODY */}
+      <div className="pf-body">
+        {(machineError && machineId) ? (
+          <div className="pf-alert warning">⚠ {machineError}</div>
+        ) : null}
+
+        {machineId ? (
+          <div className={`pf-status-bar ${isOnline ? "" : "offline"}`}>
+            <span className="dot" />
+            {isLocked
+              ? "Printer out of paper"
+              : isOnline
+              ? "Printer online"
+              : "Connecting to printer..."}
+          </div>
+        ) : null}
+
+        {currentStep === 1 ? (
+          <StepUpload
+            file={file}
+            handleFileChange={handleFileChange}
+            fileError={fileError}
+            color={color} setColor={setColor}
+            copies={copies} setCopies={setCopies}
+            printSide={printSide} setPrintSide={setPrintSide}
+            paperSize={paperSize} setPaperSize={setPaperSize}
+            isLocked={isLocked}
+            jobError={jobError}
+          />
+        ) : null}
+
+        {currentStep === 2 ? (
+          <StepSummary
+            jobId={jobId}
+            summary={summary}
+            color={color} setColor={setColor}
+            copies={copies} setCopies={setCopies}
+            printSide={printSide} setPrintSide={setPrintSide}
+            paperSize={paperSize} setPaperSize={setPaperSize}
+            jobError={jobError}
+            jobSuccess={jobSuccess}
+            isLocked={isLocked}
+            file={file}
+            onBack={resetJob}
+          />
+        ) : null}
+
+        {currentStep === 3 ? (
+          <StepOTP
+            otp={otp}
+            qrToken={qrToken}
+            jobSuccess={jobSuccess}
+            jobError={jobError}
+          />
+        ) : null}
+      </div>
+
+      {actionBar !== null ? (
+        <div className="pf-action-bar">
+          {actionBar}
         </div>
+      ) : null}
+    </>
+  )}
+
+  <div className="pf-footer">SnapPrints v1.0</div>
+
+</div>
       </div>
     );
   }
