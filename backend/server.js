@@ -51,7 +51,8 @@ initSocket(server);
 const allowedOrigins = [
   "https://www.snapprints.in",
   "https://snapprints.in",
-  "https://snap-prints.vercel.app"
+  "https://snap-prints.vercel.app",
+  "https://snapprints-eight.vercel.app"
 ];
 
 app.use(cors({
