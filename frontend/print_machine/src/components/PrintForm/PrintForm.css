@@ -846,6 +846,8 @@ html, body {
   justify-content: space-between;
 }
 .pf-menu-btn {
+  margin-left: 220px;
+    width: 50px;
   background: none; border: none; cursor: pointer;
   color: var(--ink-2); padding: 8px; border-radius: 8px;
   display: flex; align-items: center;
