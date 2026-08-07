@@ -12,7 +12,7 @@ import StepUpload   from "./steps/StepUpload";
 import StepSummary  from "./steps/StepSummary";
 import StepOTP      from "./steps/StepOTP";
 import StepAuth     from "./steps/StepAuth";
-import HistoryPanel from "./HistoryPanel";
+import HistoryPanel from "./steps/HistoryPanel";
 
 function getCurrentStep(jobId, otp) {
   if (otp)   return 3;
