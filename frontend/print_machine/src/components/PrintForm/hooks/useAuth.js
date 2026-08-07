@@ -63,6 +63,15 @@ export function useAuth() {
     return () => clearInterval(t);
   }, [resendCooldown]);
 
+  const updateName = useCallback((newName) => {
+    setAuthUser((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, user: { ...prev.user, name: newName } };
+      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
   const validateDetails = useCallback(() => {
     if (!name.trim()) return "Please enter your name";
     if (!/^[6-9]\d{9}$/.test(mobile.trim())) return "Enter a valid 10-digit mobile number";
@@ -165,5 +174,6 @@ export function useAuth() {
     verifyOtp,
     changeNumber,
     logout,
+    updateName,
   };
 }

@@ -1,5 +1,6 @@
 // components/PrintForm/index.jsx
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
+import { MdMenu } from "react-icons/md";
 import "./PrintForm.css";
 
 import { useMachineStatus } from "./hooks/useMachineStatus";
@@ -7,10 +8,11 @@ import { usePrintJob }      from "./hooks/usePrintJob";
 import { useAuth }          from "./hooks/useAuth";
 import { STEPS }            from "./constants";
 
-import StepUpload  from "./steps/StepUpload";
-import StepSummary from "./steps/StepSummary";
-import StepOTP     from "./steps/StepOTP";
-import StepAuth    from "./steps/StepAuth";
+import StepUpload   from "./steps/StepUpload";
+import StepSummary  from "./steps/StepSummary";
+import StepOTP      from "./steps/StepOTP";
+import StepAuth     from "./steps/StepAuth";
+import HistoryPanel from "./HistoryPanel";
 
 function getCurrentStep(jobId, otp) {
   if (otp)   return 3;
@@ -47,12 +49,11 @@ export default function PrintForm() {
     jobError,
     jobSuccess,
     resetJob,
-  } = usePrintJob({ machineId, machineStatus });
+  } = usePrintJob({ machineId, machineStatus, token: auth.authUser?.token });
 
+  const [menuOpen, setMenuOpen] = useState(false);
   const currentStep = useMemo(() => getCurrentStep(jobId, otp), [jobId, otp]);
 
-  // actionBar defined via useMemo — always available before it's used in JSX below,
-  // regardless of where this component is edited later.
   const actionBar = useMemo(() => {
     if (currentStep === 1) {
       return (
@@ -140,8 +141,13 @@ export default function PrintForm() {
         <div className="pf-header-icon">🖨</div>
         <div className="pf-header-text">
           <h1>Snap<span className="pf-logo-accent">Prints</span></h1>
-            <p>Print Anytime Anywhere</p>
+          <p>Print Anytime Anywhere</p>
         </div>
+        {auth.isAuthenticated ? (
+          <button className="pf-menu-btn" onClick={() => setMenuOpen(true)} aria-label="My Account">
+            <MdMenu size={24} />
+          </button>
+        ) : null}
       </div>
 
       {/* CARD */}
@@ -240,6 +246,13 @@ export default function PrintForm() {
         <div className="pf-footer">SnapPrints v1.0</div>
 
       </div>
+
+      <HistoryPanel
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        authUser={auth.authUser}
+        onNameUpdated={auth.updateName}
+      />
     </div>
   );
 }

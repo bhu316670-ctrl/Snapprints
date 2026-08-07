@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { API_BASE } from "../constants";
 
-export function usePrintJob({ machineId, machineStatus, onJobComplete }) {
+export function usePrintJob({ machineId, machineStatus, token, onJobComplete }) {
   // Print options
   const [color, setColor] = useState("bw");
   const [copies, setCopies] = useState(1);
@@ -150,6 +150,8 @@ export function usePrintJob({ machineId, machineStatus, onJobComplete }) {
      FIX: setJobId immediately after upload response,
      then fetch summary in the background.
      This makes the step transition instant.
+     Attaches Authorization header when a customer token
+     is available, so the backend can link customer_id.
   ----------------------------------------------- */
   const handleUploadJob = async () => {
     setJobError("");
@@ -175,8 +177,15 @@ export function usePrintJob({ machineId, machineStatus, onJobComplete }) {
 
     try {
       setUploading(true);
+
+      // Note: don't set "Content-Type" manually — the browser needs to set
+      // the multipart boundary itself for FormData uploads.
+      const headers = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/upload-job`, {
         method: "POST",
+        headers,
         body: formData,
       });
       const data = await res.json();
@@ -318,4 +327,3 @@ export function usePrintJob({ machineId, machineStatus, onJobComplete }) {
     clearJobSuccess: () => setJobSuccess(""),
   };
 }
-

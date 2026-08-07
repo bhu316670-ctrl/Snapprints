@@ -15,7 +15,8 @@ const http        = require("http");
 const db          = require("./database/db");
 const { getIO, initSocket } = require("./server/socket");
 const adminRoutes = require("./routes/admin.routes");
-
+const customerRoutes = require("./routes/customer.routes");
+const { optionalCustomerToken } = require("./middleware/verifyCustomerToken");
 const app    = express();
 const server = http.createServer(app);
 
@@ -78,7 +79,7 @@ app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/admin", adminRoutes);
 app.use("/api/auth", authRoutes);
-
+app.use("/api/customer", customerRoutes);
 /* ── UPLOADS DIR ── */
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
@@ -339,18 +340,39 @@ app.post("/api/kiosk/heartbeat", verifyMachine, async (req, res) => {
 /* ═══════════════════════════════════════════════════════════
    UPLOAD JOB
 ═══════════════════════════════════════════════════════════ */
-app.post("/api/upload-job", upload.single("pdf"), async (req, res) => {
+// app.post("/api/upload-job", upload.single("pdf"), async (req, res) => {
+//   try {
+//     const { machineId, color, copies, paperSize, printSide } = req.body;
+
+//     const ext = path.extname(req.file.originalname).toLowerCase();
+//     const totalPages = await getPageCount(req.file.path, ext);
+
+//     const jobId = "JOB_" + Date.now();
+//     await db.query(
+//       `INSERT INTO print_jobs (job_id, machine_id, file_name, file_path, color, copies, paper_size, print_side, total_pages, status)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CREATED')`,
+//       [jobId, machineId, req.file.originalname, req.file.path, color, copies, paperSize, printSide, totalPages]
+//     );
+//     getIO().emit("job_created", { jobId, machineId, pages: totalPages });
+//     res.json({ jobId, pages: totalPages });
+//   } catch (err) {
+//     console.error("UPLOAD ERROR:", err);
+//     res.status(500).json({ error: "Upload failed" });
+//   }
+// });
+app.post("/api/upload-job", optionalCustomerToken, upload.single("pdf"), async (req, res) => {
   try {
     const { machineId, color, copies, paperSize, printSide } = req.body;
+    const customerId = req.customer ? req.customer.customerId : null;
 
     const ext = path.extname(req.file.originalname).toLowerCase();
     const totalPages = await getPageCount(req.file.path, ext);
 
     const jobId = "JOB_" + Date.now();
     await db.query(
-      `INSERT INTO print_jobs (job_id, machine_id, file_name, file_path, color, copies, paper_size, print_side, total_pages, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CREATED')`,
-      [jobId, machineId, req.file.originalname, req.file.path, color, copies, paperSize, printSide, totalPages]
+      `INSERT INTO print_jobs (job_id, machine_id, customer_id, file_name, file_path, color, copies, paper_size, print_side, total_pages, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CREATED')`,
+      [jobId, machineId, customerId, req.file.originalname, req.file.path, color, copies, paperSize, printSide, totalPages]
     );
     getIO().emit("job_created", { jobId, machineId, pages: totalPages });
     res.json({ jobId, pages: totalPages });
@@ -359,7 +381,6 @@ app.post("/api/upload-job", upload.single("pdf"), async (req, res) => {
     res.status(500).json({ error: "Upload failed" });
   }
 });
-
 /* ═══════════════════════════════════════════════════════════
    JOB SUMMARY
 ═══════════════════════════════════════════════════════════ */
