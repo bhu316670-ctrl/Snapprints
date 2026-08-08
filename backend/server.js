@@ -16,7 +16,6 @@ const db          = require("./database/db");
 const { getIO, initSocket } = require("./server/socket");
 const adminRoutes = require("./routes/admin.routes");
 const customerRoutes = require("./routes/customer.routes");
-const customerRoutes = require("./routes/customer.routes");
 const vendorRoutes   = require("./routes/vendor.routes");
 const { optionalCustomerToken } = require("./middleware/verifyCustomerToken");
 const app    = express();
