@@ -1,6 +1,7 @@
 // routes/auth.routes.js
 const express = require("express");
 const jwt     = require("jsonwebtoken");
+const bcrypt  = require("bcrypt");
 const router  = express.Router();
 const db      = require("../database/db");
 
@@ -22,12 +23,6 @@ function issueToken(customer, mobile) {
     { expiresIn: "30d" }
   );
 }
-
-/* ═══════════════════════════════════════════════════════════════════════
-   APPEND THIS BLOCK TO YOUR EXISTING routes/auth.routes.js
-   — add `const bcrypt = require("bcrypt");` near the top with your other
-     requires, then paste the two routes below just above `module.exports`.
-   ═══════════════════════════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════════════
    POST /api/auth/admin/login
@@ -106,6 +101,7 @@ router.post("/vendor/login", async (req, res) => {
     res.status(500).json({ error: "Login failed" });
   }
 });
+
 /* ═══════════════════════════════════════════════════════════
    POST /api/auth/login
    body: { name, mobile }
