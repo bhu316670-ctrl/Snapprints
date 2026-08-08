@@ -16,6 +16,8 @@ const db          = require("./database/db");
 const { getIO, initSocket } = require("./server/socket");
 const adminRoutes = require("./routes/admin.routes");
 const customerRoutes = require("./routes/customer.routes");
+const customerRoutes = require("./routes/customer.routes");
+const vendorRoutes   = require("./routes/vendor.routes");
 const { optionalCustomerToken } = require("./middleware/verifyCustomerToken");
 const app    = express();
 const server = http.createServer(app);
@@ -80,6 +82,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/admin", adminRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/customer", customerRoutes);
+app.use("/api/vendor", vendorRoutes);
 /* ── UPLOADS DIR ── */
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);

@@ -23,6 +23,89 @@ function issueToken(customer, mobile) {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   APPEND THIS BLOCK TO YOUR EXISTING routes/auth.routes.js
+   — add `const bcrypt = require("bcrypt");` near the top with your other
+     requires, then paste the two routes below just above `module.exports`.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════
+   POST /api/auth/admin/login
+   body: { email, password }
+═══════════════════════════════════════════════════════════ */
+router.post("/admin/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password)
+      return res.status(400).json({ error: "Email and password are required" });
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    const [[admin]] = await db.query(
+      `SELECT * FROM admin_users WHERE email=? AND status='ACTIVE'`, [cleanEmail]
+    );
+    if (!admin) return res.status(401).json({ error: "Invalid credentials" });
+
+    const valid = await bcrypt.compare(password, admin.password_hash);
+    if (!valid) return res.status(401).json({ error: "Invalid credentials" });
+
+    const token = jwt.sign(
+      { id: admin.id, role: "admin", name: admin.name, email: admin.email },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      token,
+      user: { id: admin.id, name: admin.name, email: admin.email, role: "admin" },
+    });
+  } catch (err) {
+    console.error("ADMIN LOGIN ERROR:", err);
+    res.status(500).json({ error: "Login failed" });
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════
+   POST /api/auth/vendor/login
+   body: { email, password }
+═══════════════════════════════════════════════════════════ */
+router.post("/vendor/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password)
+      return res.status(400).json({ error: "Email and password are required" });
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    const [[vendor]] = await db.query(
+      `SELECT * FROM vendors WHERE email=? AND status='ACTIVE'`, [cleanEmail]
+    );
+    if (!vendor) return res.status(401).json({ error: "Invalid credentials" });
+
+    const valid = await bcrypt.compare(password, vendor.password_hash);
+    if (!valid) return res.status(401).json({ error: "Invalid credentials" });
+
+    const token = jwt.sign(
+      { id: vendor.id, role: "vendor", name: vendor.full_name, email: vendor.email },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: vendor.id,
+        name: vendor.full_name,
+        email: vendor.email,
+        businessName: vendor.business_name,
+        role: "vendor",
+      },
+    });
+  } catch (err) {
+    console.error("VENDOR LOGIN ERROR:", err);
+    res.status(500).json({ error: "Login failed" });
+  }
+});
 /* ═══════════════════════════════════════════════════════════
    POST /api/auth/login
    body: { name, mobile }

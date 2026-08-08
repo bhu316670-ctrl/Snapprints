@@ -589,4 +589,255 @@ exports.machineReport = async (req, res) => {
     res.status(500).json({ error: "Failed to generate report" });
   }
 };
+/* ═══════════════════════════════════════════════════════════════════════
+   APPEND THIS BLOCK TO YOUR EXISTING controllers/admin.controller.js
+   Requires `bcrypt` — already imported at the top of your file.
+   ═══════════════════════════════════════════════════════════════════════ */
 
+/* ===========================
+   CREATE VENDOR
+   Admin sets an initial password directly (no self-signup for vendors).
+=========================== */
+exports.createVendor = async (req, res) => {
+  try {
+    const { fullName, email, phone, businessName, gstNumber, password } = req.body;
+
+    if (!fullName || !email || !password) {
+      return res.status(400).json({ error: "fullName, email and password are required" });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    const [[existing]] = await db.query(`SELECT id FROM vendors WHERE email=?`, [cleanEmail]);
+    if (existing) return res.status(409).json({ error: "A vendor with this email already exists" });
+
+    const hash = await bcrypt.hash(password, 10);
+
+    const [result] = await db.query(
+      `INSERT INTO vendors (full_name, email, phone, password_hash, business_name, gst_number, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')`,
+      [fullName.trim(), cleanEmail, phone || null, hash, businessName || null, gstNumber || null]
+    );
+
+    res.json({
+      success: true,
+      vendor: { id: result.insertId, fullName, email: cleanEmail, businessName: businessName || null },
+    });
+  } catch (err) {
+    console.error("CREATE VENDOR ERROR:", err);
+    res.status(500).json({ error: "Failed to create vendor" });
+  }
+};
+
+/* ===========================
+   LIST VENDORS — machine count + lifetime revenue per vendor
+=========================== */
+exports.getVendors = async (req, res) => {
+  try {
+    const [vendors] = await db.query(`
+      SELECT
+        v.id, v.full_name, v.email, v.phone, v.business_name, v.gst_number, v.status, v.created_at,
+        COUNT(DISTINCT m.id) AS machine_count,
+        COALESCE(SUM(CASE WHEN p.status='PRINTED' THEN p.amount ELSE 0 END), 0) AS total_revenue
+      FROM vendors v
+      LEFT JOIN machines m ON m.owner_vendor_id = v.id
+      LEFT JOIN print_jobs p ON p.machine_id = m.machine_id
+      GROUP BY v.id
+      ORDER BY v.created_at DESC
+    `);
+    res.json(vendors);
+  } catch (err) {
+    console.error("GET VENDORS ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch vendors" });
+  }
+};
+
+/* ===========================
+   VENDOR DETAIL — admin drill-down view of one vendor
+=========================== */
+exports.getVendorDetail = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+
+    const [[vendor]] = await db.query(
+      `SELECT id, full_name, email, phone, business_name, gst_number, status, created_at
+       FROM vendors WHERE id=?`,
+      [vendorId]
+    );
+    if (!vendor) return res.status(404).json({ error: "Vendor not found" });
+
+    const [machines] = await db.query(`
+      SELECT m.machine_id, m.name, m.status, m.last_seen_at,
+        COUNT(p.id) AS total_prints,
+        COALESCE(SUM(CASE WHEN p.status='PRINTED' THEN p.amount ELSE 0 END), 0) AS revenue
+      FROM machines m
+      LEFT JOIN print_jobs p ON p.machine_id = m.machine_id AND p.status='PRINTED'
+      WHERE m.owner_vendor_id = ?
+      GROUP BY m.id
+    `, [vendorId]);
+
+    const [[bank]] = await db.query(
+      `SELECT * FROM bank_accounts WHERE vendor_id=? ORDER BY id DESC LIMIT 1`, [vendorId]
+    );
+
+    res.json({ vendor, machines, bank: bank || null });
+  } catch (err) {
+    console.error("GET VENDOR DETAIL ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch vendor detail" });
+  }
+};
+
+/* ===========================
+   LIST CUSTOMERS
+=========================== */
+exports.getCustomers = async (req, res) => {
+  try {
+    const [customers] = await db.query(`
+      SELECT c.id, c.name, c.phone, c.created_at,
+        COUNT(p.id) AS total_orders,
+        COALESCE(SUM(CASE WHEN p.status='PRINTED' THEN p.amount ELSE 0 END), 0) AS total_spent
+      FROM customers c
+      LEFT JOIN print_jobs p ON p.customer_id = c.id
+      GROUP BY c.id
+      ORDER BY c.created_at DESC
+    `);
+    res.json(customers);
+  } catch (err) {
+    console.error("GET CUSTOMERS ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch customers" });
+  }
+};
+
+/* ===========================
+   ASSIGN / UNASSIGN MACHINE
+=========================== */
+exports.assignMachineToVendor = async (req, res) => {
+  try {
+    const { machineId } = req.params;
+    const { vendorId } = req.body;
+    if (!vendorId) return res.status(400).json({ error: "vendorId is required" });
+
+    const [[vendor]] = await db.query(`SELECT id FROM vendors WHERE id=?`, [vendorId]);
+    if (!vendor) return res.status(404).json({ error: "Vendor not found" });
+
+    const [r] = await db.query(`UPDATE machines SET owner_vendor_id=? WHERE machine_id=?`, [vendorId, machineId]);
+    if (!r.affectedRows) return res.status(404).json({ error: "Machine not found" });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("ASSIGN MACHINE ERROR:", err);
+    res.status(500).json({ error: "Failed to assign machine" });
+  }
+};
+
+exports.unassignMachine = async (req, res) => {
+  try {
+    const { machineId } = req.params;
+    const [r] = await db.query(`UPDATE machines SET owner_vendor_id=NULL WHERE machine_id=?`, [machineId]);
+    if (!r.affectedRows) return res.status(404).json({ error: "Machine not found" });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("UNASSIGN MACHINE ERROR:", err);
+    res.status(500).json({ error: "Failed to unassign machine" });
+  }
+};
+
+/* ===========================
+   WITHDRAWALS — list + approve/reject/mark-paid
+=========================== */
+exports.getWithdrawals = async (req, res) => {
+  try {
+    const { status } = req.query; // optional filter: PENDING | APPROVED | REJECTED | PAID
+    const params = [];
+    let where = "";
+    if (status) { where = "WHERE w.status=?"; params.push(status); }
+
+    const [rows] = await db.query(`
+      SELECT w.*, v.full_name AS vendor_name, v.email AS vendor_email
+      FROM withdrawals w
+      JOIN vendors v ON v.id = w.vendor_id
+      ${where}
+      ORDER BY w.requested_at DESC
+    `, params);
+
+    res.json(rows);
+  } catch (err) {
+    console.error("GET WITHDRAWALS ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch withdrawals" });
+  }
+};
+
+exports.updateWithdrawalStatus = async (req, res) => {
+  const connection = await db.getConnection();
+  try {
+    const { withdrawalId } = req.params;
+    const { status, remarks } = req.body; // APPROVED | REJECTED | PAID
+
+    if (!["APPROVED", "REJECTED", "PAID"].includes(status)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+
+    await connection.beginTransaction();
+
+    const [[withdrawal]] = await connection.query(
+      `SELECT * FROM withdrawals WHERE id=? FOR UPDATE`, [withdrawalId]
+    );
+    if (!withdrawal) {
+      await connection.rollback();
+      return res.status(404).json({ error: "Withdrawal not found" });
+    }
+
+    await connection.query(
+      `UPDATE withdrawals
+       SET status=?, remarks=?, approved_at=IF(?='APPROVED', NOW(), approved_at), approved_by=?
+       WHERE id=?`,
+      [status, remarks || null, status, req.staff.id, withdrawalId]
+    );
+
+    // Mark-paid also writes the payout ledger row.
+    if (status === "PAID") {
+      await connection.query(
+        `INSERT INTO payouts (withdrawal_id, amount, status, paid_at) VALUES (?, ?, 'SUCCESS', NOW())`,
+        [withdrawalId, withdrawal.amount]
+      );
+    }
+
+    await connection.commit();
+    res.json({ success: true });
+  } catch (err) {
+    await connection.rollback();
+    console.error("UPDATE WITHDRAWAL ERROR:", err);
+    res.status(500).json({ error: "Failed to update withdrawal" });
+  } finally {
+    connection.release();
+  }
+};
+
+/* ===========================
+   REVENUE OVERVIEW — platform totals + per-vendor breakdown
+   (Per-machine breakdown is already covered by your existing getMachineInfo.)
+=========================== */
+exports.getRevenueOverview = async (req, res) => {
+  try {
+    const [[totals]] = await db.query(`
+      SELECT COALESCE(SUM(amount),0) AS total_revenue, COUNT(*) AS total_prints
+      FROM print_jobs WHERE status='PRINTED'
+    `);
+
+    const [perVendor] = await db.query(`
+      SELECT v.id AS vendor_id, v.full_name AS vendor_name,
+        COALESCE(SUM(p.amount),0) AS revenue,
+        COUNT(p.id) AS prints
+      FROM vendors v
+      LEFT JOIN machines m ON m.owner_vendor_id=v.id
+      LEFT JOIN print_jobs p ON p.machine_id=m.machine_id AND p.status='PRINTED'
+      GROUP BY v.id
+      ORDER BY revenue DESC
+    `);
+
+    res.json({ totals, perVendor });
+  } catch (err) {
+    console.error("REVENUE OVERVIEW ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch revenue overview" });
+  }
+};
