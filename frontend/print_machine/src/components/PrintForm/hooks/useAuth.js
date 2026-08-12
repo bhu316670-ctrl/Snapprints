@@ -4,33 +4,33 @@ import { useState, useEffect, useCallback } from "react";
 const API_BASE = process.env.REACT_APP_API_BASE || "https://snapprints-production-b39c.up.railway.app/api";
 const AUTH_STORAGE_KEY = "snapprints_auth";
 
-async function apiLoginOrRegister(name, mobile) {
+async function apiLoginOrRegister(mobile) {
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, mobile }),
+    body: JSON.stringify({ mobile }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Login failed");
   return data; // { status: "otp_sent" } or { status: "logged_in", token, user }
 }
 
-async function apiVerifyOtp(name, mobile, otp) {
+async function apiVerifyOtp(mobile, otp) {
   const res = await fetch(`${API_BASE}/auth/verify-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, mobile, otp }),
+    body: JSON.stringify({ mobile, otp }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Invalid OTP");
   return data; // { status: "logged_in", token, user }
 }
 
-async function apiResendOtp(name, mobile) {
+async function apiResendOtp(mobile) {
   const res = await fetch(`${API_BASE}/auth/resend-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, mobile }),
+    body: JSON.stringify({ mobile }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Could not resend OTP");
@@ -48,11 +48,10 @@ function loadStoredAuth() {
 
 export function useAuth() {
   const [authUser, setAuthUser] = useState(() => loadStoredAuth());
-  const [phase, setPhase] = useState("details"); // "details" | "otp"
-  const [name, setName] = useState("");
+  const [phase, setPhase] = useState("details"); // "details" (mobile entry) | "otp"
   const [mobile, setMobile] = useState("");
   const [otp, setOtp] = useState("");
-  const [submitting, setSubmitting] = useState(false); // covers the details step (may or may not need OTP)
+  const [submitting, setSubmitting] = useState(false); // covers the mobile step (may or may not need OTP)
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
@@ -72,11 +71,10 @@ export function useAuth() {
     });
   }, []);
 
-  const validateDetails = useCallback(() => {
-    if (!name.trim()) return "Please enter your name";
+  const validateMobile = useCallback(() => {
     if (!/^[6-9]\d{9}$/.test(mobile.trim())) return "Enter a valid 10-digit mobile number";
     return "";
-  }, [name, mobile]);
+  }, [mobile]);
 
   const persistAuth = useCallback((token, user) => {
     const authData = { token, user, mobile: user.mobile };
@@ -84,10 +82,10 @@ export function useAuth() {
     sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
   }, []);
 
-  // Submitting name + mobile — backend decides: known number → login directly,
-  // new number → move to OTP phase.
+  // Submitting mobile number — backend decides: known + verified number → log
+  // in directly, new number → move to OTP phase.
   const submitDetails = useCallback(async () => {
-    const validationError = validateDetails();
+    const validationError = validateMobile();
     if (validationError) {
       setError(validationError);
       return;
@@ -95,7 +93,7 @@ export function useAuth() {
     setError("");
     setSubmitting(true);
     try {
-      const result = await apiLoginOrRegister(name.trim(), mobile.trim());
+      const result = await apiLoginOrRegister(mobile.trim());
 
       if (result.status === "logged_in") {
         persistAuth(result.token, result.user);
@@ -110,21 +108,21 @@ export function useAuth() {
     } finally {
       setSubmitting(false);
     }
-  }, [name, mobile, validateDetails, persistAuth]);
+  }, [mobile, validateMobile, persistAuth]);
 
   const resendOtp = useCallback(async () => {
     if (resendCooldown > 0) return;
     setError("");
     setSubmitting(true);
     try {
-      await apiResendOtp(name.trim(), mobile.trim());
+      await apiResendOtp(mobile.trim());
       setResendCooldown(30);
     } catch (err) {
       setError(err.message || "Could not resend OTP. Try again.");
     } finally {
       setSubmitting(false);
     }
-  }, [name, mobile, resendCooldown]);
+  }, [mobile, resendCooldown]);
 
   const verifyOtp = useCallback(async () => {
     if (!otp.trim()) {
@@ -134,14 +132,14 @@ export function useAuth() {
     setError("");
     setVerifying(true);
     try {
-      const { token, user } = await apiVerifyOtp(name.trim(), mobile.trim(), otp.trim());
+      const { token, user } = await apiVerifyOtp(mobile.trim(), otp.trim());
       persistAuth(token, user);
     } catch (err) {
       setError(err.message || "Invalid OTP. Try again.");
     } finally {
       setVerifying(false);
     }
-  }, [otp, name, mobile, persistAuth]);
+  }, [otp, mobile, persistAuth]);
 
   const changeNumber = useCallback(() => {
     setPhase("details");
@@ -152,7 +150,6 @@ export function useAuth() {
   const logout = useCallback(() => {
     setAuthUser(null);
     setPhase("details");
-    setName("");
     setMobile("");
     setOtp("");
     sessionStorage.removeItem(AUTH_STORAGE_KEY);
@@ -162,7 +159,6 @@ export function useAuth() {
     isAuthenticated: !!authUser,
     authUser,
     phase,
-    name, setName,
     mobile, setMobile,
     otp, setOtp,
     submitting,

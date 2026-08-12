@@ -1,6 +1,6 @@
 // steps/StepAuth.jsx
 import React, { useEffect, useRef } from "react";
-import { MdPerson, MdPhoneIphone, MdArrowBack, MdLockOutline } from "react-icons/md";
+import { MdArrowBack, MdLockOutline, MdPhoneIphone } from "react-icons/md";
 
 const OTP_LENGTH = 6;
 
@@ -73,7 +73,6 @@ function OtpBoxes({ value, onChange, disabled }) {
 
 export default function StepAuth({
   phase,
-  name, setName,
   mobile, setMobile,
   otp, setOtp,
   submitting,
@@ -85,8 +84,7 @@ export default function StepAuth({
   verifyOtp,
   changeNumber,
 }) {
-  // Auto-submit the moment all 6 digits are in — feels instant, like every
-  // major OTP flow (bank apps, Netflix, Swiggy).
+  // Auto-submit the moment all 6 digits are in.
   const autoSubmittedRef = useRef(false);
   useEffect(() => {
     if (otp.length === OTP_LENGTH && !verifying && !autoSubmittedRef.current) {
@@ -99,7 +97,7 @@ export default function StepAuth({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otp]);
 
-  const handleDetailsSubmit = (e) => {
+  const handleMobileSubmit = (e) => {
     e.preventDefault();
     submitDetails();
   };
@@ -109,94 +107,69 @@ export default function StepAuth({
     verifyOtp();
   };
 
-  const detailsValid = name.trim().length > 1 && mobile.length === 10;
+  const mobileValid = mobile.length === 10;
 
   return (
-    <div className="pf-step-enter">
-      <div className="pf-auth-hero">
-        <div className="pf-auth-hero-icon">
-          {phase === "details" ? <MdPerson size={26} /> : <MdLockOutline size={26} />}
-        </div>
-        {phase === "details" ? (
-          <>
-            <h2>Welcome to SnapPrints</h2>
-            <p>Enter your details to start printing</p>
-          </>
-        ) : (
-          <>
-            <h2>Verify your number</h2>
-            <p>
-              Code sent to <strong>+91 {mobile}</strong>
-            </p>
-          </>
-        )}
-      </div>
-
+    <div className="pf-step-enter pf-auth-screen">
       {phase === "details" ? (
-        <form onSubmit={handleDetailsSubmit}>
-          <div className="pf-field" style={{ marginBottom: 14 }}>
-            <label>Full Name</label>
-            <div className="pf-input-icon-wrap">
-              <MdPerson size={17} />
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Enter your name"
-                autoComplete="name"
-              />
+        <form onSubmit={handleMobileSubmit} className="pf-auth-form">
+          <div className="pf-auth-hero left">
+            <div className="pf-auth-hero-icon">
+              <MdPhoneIphone size={24} />
             </div>
+            <h2>What's your number?</h2>
+            <p>We'll text you a code to verify it's you</p>
           </div>
 
-          <div className="pf-field" style={{ marginBottom: 14 }}>
+          <div className="pf-field">
             <label>Mobile Number</label>
-            <div className="pf-input-icon-wrap mobile">
-              <MdPhoneIphone size={17} />
-              <span className="pf-input-prefix">+91</span>
+            <div className="pf-mobile-field">
+              <span className="pf-mobile-flag" aria-hidden="true">🇮🇳</span>
+              <span className="pf-mobile-code">+91</span>
               <input
                 type="tel"
                 inputMode="numeric"
                 maxLength={10}
                 value={mobile}
                 onChange={(e) => setMobile(e.target.value.replace(/\D/g, ""))}
-                placeholder="10-digit mobile number"
+                placeholder="Enter mobile number"
                 autoComplete="tel"
+                autoFocus
               />
             </div>
           </div>
 
           {error ? <div className="pf-alert error">⚠ {error}</div> : null}
 
+          <p className="pf-auth-consent">
+            By continuing, you agree to receive SMS updates about your print jobs.
+          </p>
+
           <button
             type="submit"
             className="pf-btn primary"
-            disabled={submitting || !detailsValid}
-            style={{ width: "100%", marginTop: 6 }}
+            disabled={submitting || !mobileValid}
           >
-            {submitting ? (<><span className="pf-spinner" /> Checking...</>) : "Continue"}
+            {submitting ? (<><span className="pf-spinner" /> Please wait...</>) : "Next"}
           </button>
         </form>
       ) : (
-        <form onSubmit={handleOtpSubmit}>
+        <form onSubmit={handleOtpSubmit} className="pf-auth-form">
           <button type="button" onClick={changeNumber} className="pf-auth-back">
-            <MdArrowBack size={14} /> Change number
+            <MdArrowBack size={16} /> Verify OTP
           </button>
 
-          <div className="pf-field" style={{ marginBottom: 6 }}>
-            <label>Enter OTP</label>
-            <OtpBoxes value={otp} onChange={setOtp} disabled={verifying} />
+          <div className="pf-auth-hero left">
+            <div className="pf-auth-hero-icon">
+              <MdLockOutline size={24} />
+            </div>
+            <h2>Enter verification code</h2>
+            <p>Sent to <strong>+91 {mobile}</strong></p>
           </div>
 
-          {error ? <div className="pf-alert error" style={{ marginTop: 12 }}>⚠ {error}</div> : null}
+          <OtpBoxes value={otp} onChange={setOtp} disabled={verifying} />
 
-          <button
-            type="submit"
-            className="pf-btn primary"
-            disabled={verifying || otp.length !== OTP_LENGTH}
-            style={{ width: "100%", marginTop: 16 }}
-          >
-            {verifying ? (<><span className="pf-spinner" /> Verifying...</>) : "Verify & Continue"}
-          </button>
+          {error ? <div className="pf-alert error" style={{ marginTop: 14 }}>⚠ {error}</div> : null}
 
           <div className="pf-resend-row">
             {resendCooldown > 0 ? (
@@ -215,6 +188,15 @@ export default function StepAuth({
               </>
             )}
           </div>
+
+          <button
+            type="submit"
+            className="pf-btn primary"
+            disabled={verifying || otp.length !== OTP_LENGTH}
+            style={{ marginTop: 18 }}
+          >
+            {verifying ? (<><span className="pf-spinner" /> Verifying...</>) : "Verify & Continue"}
+          </button>
         </form>
       )}
     </div>
