@@ -104,19 +104,18 @@ router.post("/vendor/login", async (req, res) => {
 
 /* ═══════════════════════════════════════════════════════════
    POST /api/auth/login
-   body: { name, mobile }
+   body: { mobile }
+   Mobile-only login — no name collected up front.
    - Known + already-verified number  -> logs in directly
    - New number OR not yet verified   -> (re)sends OTP
 ═══════════════════════════════════════════════════════════ */
 router.post("/login", async (req, res) => {
   try {
-    const { name, mobile } = req.body;
+    const { mobile } = req.body;
 
-    if (!name || !name.trim()) return res.status(400).json({ error: "Name is required" });
     if (!mobile || !MOBILE_REGEX.test(mobile.trim()))
       return res.status(400).json({ error: "Enter a valid 10-digit mobile number" });
 
-    const cleanName   = name.trim();
     const cleanMobile = mobile.trim();
 
     const [[existing]] = await db.query(
@@ -125,14 +124,11 @@ router.post("/login", async (req, res) => {
 
     // ── Known number, already OTP-verified before → skip OTP entirely ──
     if (existing && existing.otp_verified) {
-      if (existing.name !== cleanName) {
-        await db.query(`UPDATE customers SET name=? WHERE id=?`, [cleanName, existing.id]);
-      }
       const token = issueToken(existing, cleanMobile);
       return res.json({
         status: "logged_in",
         token,
-        user: { name: cleanName, mobile: cleanMobile },
+        user: { name: existing.name, mobile: cleanMobile },
       });
     }
 
@@ -140,12 +136,18 @@ router.post("/login", async (req, res) => {
     const otp    = generateOTP();
     const expiry = new Date(Date.now() + OTP_TTL_MS);
 
+    // We no longer collect a name up front. `customers.name` is kept filled
+    // with a friendly placeholder so inserts keep working even if that
+    // column is NOT NULL — the customer can set a real name later from
+    // "My Account". Safe to simplify once/if the column is made nullable.
+    const placeholderName = existing?.name || `Customer ${cleanMobile.slice(-4)}`;
+
     await db.query(
       `INSERT INTO customers (name, phone, otp, otp_verified, otp_expires_at)
        VALUES (?, ?, ?, 0, ?)
        ON DUPLICATE KEY UPDATE
-         name=VALUES(name), otp=VALUES(otp), otp_verified=0, otp_expires_at=VALUES(otp_expires_at)`,
-      [cleanName, cleanMobile, otp, expiry]
+         otp=VALUES(otp), otp_verified=0, otp_expires_at=VALUES(otp_expires_at)`,
+      [placeholderName, cleanMobile, otp, expiry]
     );
 
     await sendOtpSms(cleanMobile, otp);
@@ -159,28 +161,26 @@ router.post("/login", async (req, res) => {
 
 /* ═══════════════════════════════════════════════════════════
    POST /api/auth/resend-otp
-   body: { name, mobile }
+   body: { mobile }
    Always regenerates + resends OTP, regardless of verified state.
 ═══════════════════════════════════════════════════════════ */
 router.post("/resend-otp", async (req, res) => {
   try {
-    const { name, mobile } = req.body;
+    const { mobile } = req.body;
     if (!mobile || !MOBILE_REGEX.test(mobile.trim()))
       return res.status(400).json({ error: "Enter a valid 10-digit mobile number" });
 
     const cleanMobile = mobile.trim();
-    const cleanName    = (name || "").trim();
+
+    const [[existing]] = await db.query(`SELECT id FROM customers WHERE phone=?`, [cleanMobile]);
+    if (!existing) return res.status(404).json({ error: "No login attempt found for this number" });
 
     const otp    = generateOTP();
     const expiry = new Date(Date.now() + OTP_TTL_MS);
 
-    const [[existing]] = await db.query(`SELECT id, name FROM customers WHERE phone=?`, [cleanMobile]);
-    if (!existing) return res.status(404).json({ error: "No login attempt found for this number" });
-
     await db.query(
-      `UPDATE customers SET otp=?, otp_verified=0, otp_expires_at=?, name=COALESCE(NULLIF(?, ''), name)
-       WHERE id=?`,
-      [otp, expiry, cleanName, existing.id]
+      `UPDATE customers SET otp=?, otp_verified=0, otp_expires_at=? WHERE id=?`,
+      [otp, expiry, existing.id]
     );
 
     await sendOtpSms(cleanMobile, otp);
@@ -193,11 +193,11 @@ router.post("/resend-otp", async (req, res) => {
 
 /* ═══════════════════════════════════════════════════════════
    POST /api/auth/verify-otp
-   body: { name, mobile, otp }
+   body: { mobile, otp }
 ═══════════════════════════════════════════════════════════ */
 router.post("/verify-otp", async (req, res) => {
   try {
-    const { name, mobile, otp } = req.body;
+    const { mobile, otp } = req.body;
     if (!mobile || !otp) return res.status(400).json({ error: "Mobile and OTP are required" });
 
     const cleanMobile = mobile.trim();
@@ -216,13 +216,12 @@ router.post("/verify-otp", async (req, res) => {
       [customer.id]
     );
 
-    const finalName = (name && name.trim()) || customer.name;
     const token = issueToken(customer, cleanMobile);
 
     return res.json({
       status: "logged_in",
       token,
-      user: { name: finalName, mobile: cleanMobile },
+      user: { name: customer.name, mobile: cleanMobile },
     });
   } catch (err) {
     console.error("AUTH VERIFY ERROR:", err);
