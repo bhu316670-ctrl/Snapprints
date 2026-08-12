@@ -1,6 +1,9 @@
 // HistoryPanel.jsx
 import React, { useEffect, useState, useCallback } from "react";
-import { MdClose, MdEdit, MdCheck } from "react-icons/md";
+import {
+  MdClose, MdEdit, MdCheck, MdPictureAsPdf, MdImage,
+  MdDescription, MdInsertDriveFile, MdHistoryToggleOff,
+} from "react-icons/md";
 
 const API_BASE = process.env.REACT_APP_API_BASE || "https://snapprints-production-b39c.up.railway.app/api";
 
@@ -17,6 +20,33 @@ function formatDate(iso) {
     " · " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 }
 
+function getInitials(name) {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  const initials = parts.length > 1
+    ? parts[0][0] + parts[parts.length - 1][0]
+    : parts[0].slice(0, 2);
+  return initials.toUpperCase();
+}
+
+function FileIcon({ fileName }) {
+  const ext = (fileName || "").split(".").pop().toLowerCase();
+  if (ext === "pdf") return <MdPictureAsPdf size={19} />;
+  if (["jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"].includes(ext)) return <MdImage size={19} />;
+  if (["doc", "docx", "txt"].includes(ext)) return <MdDescription size={19} />;
+  return <MdInsertDriveFile size={19} />;
+}
+
+function HistorySkeleton() {
+  return (
+    <div className="pf-history-skeleton">
+      <div className="pf-skel-row" />
+      <div className="pf-skel-row" />
+      <div className="pf-skel-row" />
+    </div>
+  );
+}
+
 export default function HistoryPanel({ open, onClose, authUser, onNameUpdated }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -28,6 +58,7 @@ export default function HistoryPanel({ open, onClose, authUser, onNameUpdated })
   const [nameError, setNameError] = useState("");
 
   const token = authUser?.token;
+  const currentName = authUser?.user?.name || "";
 
   const fetchHistory = useCallback(async () => {
     if (!token) return;
@@ -49,11 +80,21 @@ export default function HistoryPanel({ open, onClose, authUser, onNameUpdated })
 
   useEffect(() => {
     if (open) {
-      setNameDraft(authUser?.user?.name || "");
+      setNameDraft(currentName);
       setEditingName(false);
+      setNameError("");
       fetchHistory();
     }
-  }, [open, fetchHistory, authUser]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, fetchHistory]);
+
+  // Close on Escape — small touch, matters a lot on desktop
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
 
   const saveName = async () => {
     if (!nameDraft.trim()) {
@@ -79,6 +120,12 @@ export default function HistoryPanel({ open, onClose, authUser, onNameUpdated })
     }
   };
 
+  const cancelEditName = () => {
+    setNameDraft(currentName);
+    setNameError("");
+    setEditingName(false);
+  };
+
   if (!open) return null;
 
   return (
@@ -86,64 +133,86 @@ export default function HistoryPanel({ open, onClose, authUser, onNameUpdated })
       <div className="pf-drawer" onClick={(e) => e.stopPropagation()}>
         <div className="pf-drawer-header">
           <h3>My Account</h3>
-          <button className="pf-drawer-close" onClick={onClose}><MdClose size={20} /></button>
+          <button className="pf-drawer-close" onClick={onClose} aria-label="Close">
+            <MdClose size={18} />
+          </button>
         </div>
 
         <div className="pf-drawer-profile">
-          <div className="pf-drawer-profile-row">
+          <div className="pf-drawer-avatar">{getInitials(currentName)}</div>
+
+          <div className="pf-drawer-profile-info">
             {!editingName ? (
-              <>
-                <span className="pf-drawer-name">{authUser?.user?.name}</span>
-                <button className="pf-icon-btn" onClick={() => setEditingName(true)}>
-                  <MdEdit size={16} />
+              <div className="pf-drawer-profile-row">
+                <span className="pf-drawer-name">{currentName}</span>
+                <button className="pf-icon-btn" onClick={() => setEditingName(true)} aria-label="Edit name">
+                  <MdEdit size={14} />
                 </button>
-              </>
+              </div>
             ) : (
-              <>
+              <div className="pf-drawer-profile-row">
                 <input
                   type="text"
                   value={nameDraft}
                   onChange={(e) => setNameDraft(e.target.value)}
                   className="pf-drawer-name-input"
                   autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveName();
+                    if (e.key === "Escape") cancelEditName();
+                  }}
                 />
-                <button className="pf-icon-btn" onClick={saveName} disabled={savingName}>
-                  <MdCheck size={18} />
+                <button className="pf-icon-btn" onClick={saveName} disabled={savingName} aria-label="Save name">
+                  <MdCheck size={16} />
                 </button>
-              </>
+              </div>
             )}
+            <span className="pf-drawer-mobile">+91 {authUser?.mobile}</span>
+            {nameError ? <div className="pf-alert error" style={{ marginTop: 8 }}>⚠ {nameError}</div> : null}
           </div>
-          <span className="pf-drawer-mobile">+91 {authUser?.mobile}</span>
-          {nameError ? <div className="pf-alert error" style={{ marginTop: 8 }}>⚠ {nameError}</div> : null}
         </div>
 
-        <div className="pf-divider" />
-        <p className="pf-section-title">Print History</p>
+        <div className="pf-drawer-body">
+          <p className="pf-section-title">
+            Print History
+            {jobs.length > 0 ? <span className="pf-history-count">{jobs.length}</span> : null}
+          </p>
 
-        <div className="pf-drawer-history">
           {loading ? (
-            <div className="pf-preview-loading"><span className="pf-spinner dark" /><span>Loading...</span></div>
+            <HistorySkeleton />
           ) : error ? (
             <div className="pf-alert error">⚠ {error}</div>
           ) : jobs.length === 0 ? (
-            <p className="pf-drawer-empty">No print jobs yet</p>
-          ) : (
-            jobs.map((job) => (
-              <div key={job.job_id} className="pf-history-item">
-                <div className="pf-history-top">
-                  <span className="pf-history-file">{job.file_name}</span>
-                  <span className={`pf-history-status status-${job.status.toLowerCase()}`}>
-                    {STATUS_LABELS[job.status] || job.status}
-                  </span>
-                </div>
-                <div className="pf-history-bottom">
-                  <span>{formatDate(job.created_at)}</span>
-                  <span className="pf-history-amount">
-                    {job.amount != null ? `₹${job.amount}` : "—"}
-                  </span>
-                </div>
+            <div className="pf-drawer-empty">
+              <div className="pf-drawer-empty-icon">
+                <MdHistoryToggleOff size={26} />
               </div>
-            ))
+              <span>No print jobs yet</span>
+            </div>
+          ) : (
+            <div className="pf-drawer-history">
+              {jobs.map((job) => (
+                <div key={job.job_id} className="pf-history-item">
+                  <div className="pf-history-icon">
+                    <FileIcon fileName={job.file_name} />
+                  </div>
+                  <div className="pf-history-main">
+                    <div className="pf-history-top">
+                      <span className="pf-history-file">{job.file_name}</span>
+                      <span className={`pf-history-status status-${job.status.toLowerCase()}`}>
+                        {STATUS_LABELS[job.status] || job.status}
+                      </span>
+                    </div>
+                    <div className="pf-history-bottom">
+                      <span>{formatDate(job.created_at)}</span>
+                      <span className="pf-history-amount">
+                        {job.amount != null ? `₹${job.amount}` : "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>
