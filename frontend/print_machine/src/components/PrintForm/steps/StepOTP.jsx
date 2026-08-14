@@ -1,8 +1,7 @@
 // steps/StepOTP.jsx
 import React from "react";
-import { QRCodeCanvas } from "qrcode.react";
 
-export default function StepOTP({ otp, qrToken, jobSuccess, jobError }) {
+export default function StepOTP({ otp, jobSuccess, jobError }) {
   return (
     <div className="pf-step-enter">
       <p className="pf-section-title">Collect Your Prints</p>
@@ -22,25 +21,6 @@ export default function StepOTP({ otp, qrToken, jobSuccess, jobError }) {
         <div className="pf-otp-code">{otp}</div>
 
         <p className="pf-otp-expiry">Keep this screen open until printing is complete</p>
-
-        {qrToken ? (
-          <>
-            <div className="pf-or">or scan QR</div>
-            <div className="pf-qr-wrap">
-              <QRCodeCanvas
-                value={qrToken}
-                size={160}
-                bgColor="#ffffff"
-                fgColor="#0d0d0d"
-                level="H"
-              />
-            </div>
-            <p className="pf-qr-hint">
-              Scan with the kiosk camera<br />
-              or type the OTP on the keypad
-            </p>
-          </>
-        ) : null}
       </div>
 
       <div className="pf-waiting">

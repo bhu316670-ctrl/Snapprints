@@ -63,7 +63,7 @@ function OtpBoxes({ value, onChange, disabled }) {
           autoFocus={i === 0}
           onChange={(e) => handleChange(i, e.target.value)}
           onKeyDown={(e) => handleKeyDown(i, e)}
-          className="pf-otp-box"
+          className="pf-otp-cell"
           aria-label={`OTP digit ${i + 1}`}
         />
       ))}
