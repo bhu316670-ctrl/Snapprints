@@ -36,7 +36,7 @@ export default function StepSummary({
               title="Remove file and go back"
               className="pf-remove-btn"
             >
-              <ImCross size={11} />
+              <ImCross size={14} />
             </button>
           ) : null}
         </div>

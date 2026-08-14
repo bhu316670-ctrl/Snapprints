@@ -146,7 +146,7 @@ export default function HistoryPanel({ open, onClose, authUser, onNameUpdated })
               <div className="pf-drawer-profile-row">
                 <span className="pf-drawer-name">{currentName}</span>
                 <button className="pf-icon-btn" onClick={() => setEditingName(true)} aria-label="Edit name">
-                  <MdEdit size={14} />
+                  <MdEdit size={16} />
                 </button>
               </div>
             ) : (
@@ -163,7 +163,7 @@ export default function HistoryPanel({ open, onClose, authUser, onNameUpdated })
                   }}
                 />
                 <button className="pf-icon-btn" onClick={saveName} disabled={savingName} aria-label="Save name">
-                  <MdCheck size={16} />
+                  <MdCheck size={18} />
                 </button>
               </div>
             )}
