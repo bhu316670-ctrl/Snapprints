@@ -221,14 +221,11 @@ html, body {
 }
 
 .pf-header-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+  width: 58px;
+  height: 58px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff;           /* keep light so the dark-navy logo has contrast */
-  overflow: hidden;
   flex-shrink: 0;
 }
 
@@ -236,7 +233,6 @@ html, body {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  padding: 4px;               /* small breathing room so it doesn't touch edges */
 }
 .pf-header-text h1 {
   font-size: 17px; font-weight: 800;
@@ -764,7 +760,7 @@ html, body {
   .pf-otp-boxes { gap: 6px; }
   .pf-otp-cell { font-size: 16px; }
   .pf-header-text h1 { font-size: 15px; }
-  .pf-header-icon { width: 34px; height: 34px; }
+  .pf-header-icon { width: 46px; height: 46px; }
   .pf-drawer-avatar { width: 46px; height: 46px; font-size: 17px; }
 }
 
@@ -953,7 +949,6 @@ html, body {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
 }
 .pf-menu-btn {
   margin-left: auto;
