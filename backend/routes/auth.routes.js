@@ -5,7 +5,8 @@ const bcrypt  = require("bcrypt");
 const router  = express.Router();
 const db      = require("../database/db");
 
-const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit
+const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit
+//const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit
 const MOBILE_REGEX = /^[6-9]\d{9}$/;
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -140,7 +141,7 @@ router.post("/login", async (req, res) => {
     // with a friendly placeholder so inserts keep working even if that
     // column is NOT NULL — the customer can set a real name later from
     // "My Account". Safe to simplify once/if the column is made nullable.
-    const placeholderName = existing?.name || `Customer ${cleanMobile.slice(-4)}`;
+    const placeholderName = existing?.name || `Cust${cleanMobile.slice(-4)}`;
 
     await db.query(
       `INSERT INTO customers (name, phone, otp, otp_verified, otp_expires_at)
