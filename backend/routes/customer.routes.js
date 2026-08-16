@@ -33,14 +33,23 @@ router.patch("/profile", verifyCustomerToken, async (req, res) => {
 });
 
 // GET /api/customer/history
+// Includes which machine (and where it's located) each job ran on, plus
+// how it was paid — both useful for the customer's own record, and it's
+// the same data admin sees on their side so support conversations line up.
 router.get("/history", verifyCustomerToken, async (req, res) => {
   try {
     const [jobs] = await db.query(
-      `SELECT job_id, file_name, color, copies, paper_size, print_side,
-              total_pages, amount, status, created_at, printed_at
-       FROM print_jobs
-       WHERE customer_id=?
-       ORDER BY created_at DESC
+      `SELECT
+         pj.job_id, pj.file_name, pj.color, pj.copies, pj.paper_size, pj.print_side,
+         pj.total_pages, pj.amount, pj.status, pj.payment_method,
+         pj.created_at, pj.printed_at,
+         pj.machine_id, m.name AS machine_name,
+         l.name AS location_name, l.city
+       FROM print_jobs pj
+       LEFT JOIN machines m ON m.machine_id = pj.machine_id
+       LEFT JOIN locations l ON l.id = m.location_id
+       WHERE pj.customer_id=?
+       ORDER BY pj.created_at DESC
        LIMIT 50`,
       [req.customer.customerId]
     );

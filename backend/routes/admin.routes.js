@@ -31,6 +31,10 @@ router.get("/customers/:customerId", verifyAdminToken, admin.getCustomerDetail);
 /* ── Machine ↔ vendor assignment ── */
 router.patch("/machines/:machineId/assign", verifyAdminToken, admin.assignMachineToVendor);
 router.patch("/machines/:machineId/unassign", verifyAdminToken, admin.unassignMachine);
+router.get("/machines/:machineId/jobs", verifyAdminToken, admin.getMachineJobs);
+
+/* ── Manual refunds (for stuck/expired jobs the auto-refund flow never caught) ── */
+router.post("/jobs/:jobId/refund", verifyAdminToken, admin.refundJob);
 
 /* ── Withdrawals (approve / reject / mark paid) ── */
 router.get("/withdrawals", verifyAdminToken, admin.getWithdrawals);

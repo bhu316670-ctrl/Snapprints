@@ -1,6 +1,17 @@
 const crypto = require("crypto");
 const bcrypt  = require("bcrypt");
+const Razorpay = require("razorpay");
 const db      = require("../database/db");
+
+// Separate Razorpay client for admin-initiated refunds — same credentials
+// as server.js, guarded the same way (routes return 503 if keys missing).
+let razorpay = null;
+if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+  razorpay = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET,
+  });
+}
 
 // ✅ Use the same env var as server.js so Pi devices get the correct Railway URL
 const SERVER_API_BASE = process.env.API_BASE_URL || "https://snapprints-production.up.railway.app/api";
@@ -696,7 +707,7 @@ exports.getCustomerDetail = async (req, res) => {
       SELECT
         pj.job_id, pj.machine_id, m.name AS machine_name,
         pj.file_name, pj.total_pages, pj.copies, pj.color, pj.paper_size, pj.print_side,
-        pj.amount, pj.status, pj.payment_id,
+        pj.amount, pj.status, pj.payment_id, pj.payment_method, pj.payment_details,
         pj.created_at, pj.updated_at, pj.printed_at,
         pjt.otp_verified, pjt.otp_expires_at
       FROM print_jobs pj
@@ -719,7 +730,13 @@ exports.getCustomerDetail = async (req, res) => {
       } else if (j.status === "FAILED") {
         flag = "FAILED";
       }
-      return { ...j, flag };
+
+      let paymentDetails = j.payment_details;
+      if (typeof paymentDetails === "string") {
+        try { paymentDetails = JSON.parse(paymentDetails); } catch { paymentDetails = null; }
+      }
+
+      return { ...j, payment_details: paymentDetails, flag };
     });
 
     res.json({ customer, jobs: enrichedJobs });
@@ -860,5 +877,108 @@ exports.getRevenueOverview = async (req, res) => {
   } catch (err) {
     console.error("REVENUE OVERVIEW ERROR:", err);
     res.status(500).json({ error: "Failed to fetch revenue overview" });
+  }
+};
+
+/* ===========================
+   MACHINE JOBS — reverse view of customer detail: which customers
+   have used THIS machine, with the same PAID_NOT_VERIFIED /
+   STUCK_PRINTING / FAILED flags so problem jobs are visible either
+   way you're looking at the data (by customer or by machine).
+=========================== */
+exports.getMachineJobs = async (req, res) => {
+  try {
+    const { machineId } = req.params;
+
+    const [[machine]] = await db.query(
+      `SELECT machine_id, name FROM machines WHERE machine_id=?`,
+      [machineId]
+    );
+    if (!machine) return res.status(404).json({ error: "Machine not found" });
+
+    const [jobs] = await db.query(`
+      SELECT
+        pj.job_id, pj.customer_id, c.name AS customer_name, c.phone AS customer_phone,
+        pj.file_name, pj.amount, pj.status, pj.payment_id, pj.payment_method, pj.payment_details,
+        pj.created_at, pj.updated_at, pj.printed_at
+      FROM print_jobs pj
+      LEFT JOIN customers c ON c.id = pj.customer_id
+      WHERE pj.machine_id = ?
+      ORDER BY pj.created_at DESC
+    `, [machineId]);
+
+    const now = Date.now();
+    const enrichedJobs = jobs.map((j) => {
+      let flag = null;
+      if (j.status === "EXPIRED") {
+        flag = "PAID_NOT_VERIFIED";
+      } else if (j.status === "PRINTING") {
+        const sinceUpdate = j.updated_at ? now - new Date(j.updated_at).getTime() : null;
+        if (sinceUpdate !== null && sinceUpdate > 15 * 60 * 1000) {
+          flag = "STUCK_PRINTING";
+        }
+      } else if (j.status === "FAILED") {
+        flag = "FAILED";
+      }
+
+      let paymentDetails = j.payment_details;
+      if (typeof paymentDetails === "string") {
+        try { paymentDetails = JSON.parse(paymentDetails); } catch { paymentDetails = null; }
+      }
+
+      return { ...j, payment_details: paymentDetails, flag };
+    });
+
+    res.json({ machine, jobs: enrichedJobs });
+  } catch (err) {
+    console.error("GET MACHINE JOBS ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch machine jobs" });
+  }
+};
+
+/* ===========================
+   MANUAL REFUND — for jobs that never went through the automatic
+   mark-failed→refund flow (e.g. paid but OTP expired unused, or a
+   machine that hung mid-print and never called mark-failed). Refunds
+   go back to whatever payment method was originally used — Razorpay
+   handles that routing automatically, we just call the API.
+=========================== */
+exports.refundJob = async (req, res) => {
+  try {
+    if (!razorpay) return res.status(503).json({ error: "Payment service unavailable" });
+
+    const { jobId } = req.params;
+
+    const [[job]] = await db.query(`SELECT * FROM print_jobs WHERE job_id=?`, [jobId]);
+    if (!job) return res.status(404).json({ error: "Job not found" });
+
+    if (!job.payment_id) {
+      return res.status(400).json({ error: "No payment was captured for this job — nothing to refund" });
+    }
+    if (!["PAID", "PRINTING", "EXPIRED", "FAILED"].includes(job.status)) {
+      return res.status(400).json({ error: `Refunding a job in status ${job.status} isn't supported` });
+    }
+
+    const refund = await razorpay.payments.refund(job.payment_id, {
+      amount: Math.round(Number(job.amount) * 100),
+    });
+
+    // Move it to FAILED so it drops out of the "needs attention" flags,
+    // and log the refund reference for reconciliation.
+    await db.query(
+      `UPDATE print_jobs SET status='FAILED', updated_at=NOW() WHERE id=?`,
+      [job.id]
+    );
+
+    await db.query(
+      `INSERT INTO audit_logs (machine_id, job_id, action_type, actor_admin_id, details)
+       VALUES (?, ?, 'JOB_FAILED', ?, ?)`,
+      [job.machine_id, job.job_id, req.staff.id, JSON.stringify({ manual_refund: true, refund_id: refund.id })]
+    );
+
+    res.json({ success: true, refundId: refund.id });
+  } catch (err) {
+    console.error("REFUND JOB ERROR:", err);
+    res.status(500).json({ error: err.message || "Refund failed" });
   }
 };
