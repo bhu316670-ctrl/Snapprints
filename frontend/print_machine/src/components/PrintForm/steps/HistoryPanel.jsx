@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import {
   MdClose, MdEdit, MdCheck, MdPictureAsPdf, MdImage,
-  MdDescription, MdInsertDriveFile, MdHistoryToggleOff,
+  MdDescription, MdInsertDriveFile, MdHistoryToggleOff, MdPrint,
 } from "react-icons/md";
 
 const API_BASE = process.env.REACT_APP_API_BASE || "https://snapprints-production-b39c.up.railway.app/api";
@@ -11,6 +11,14 @@ const STATUS_LABELS = {
   CREATED: "Created", PRICED: "Priced", PAYING: "Paying",
   PAID: "Paid", PRINTING: "Printing", PRINTED: "Printed",
   FAILED: "Failed", EXPIRED: "Expired",
+};
+
+const PAYMENT_METHOD_LABELS = {
+  upi: "UPI",
+  card: "Card",
+  netbanking: "Net Banking",
+  wallet: "Wallet",
+  emi: "EMI",
 };
 
 function formatDate(iso) {
@@ -191,27 +199,54 @@ export default function HistoryPanel({ open, onClose, authUser, onNameUpdated })
             </div>
           ) : (
             <div className="pf-drawer-history">
-              {jobs.map((job) => (
-                <div key={job.job_id} className="pf-history-item">
-                  <div className="pf-history-icon">
-                    <FileIcon fileName={job.file_name} />
-                  </div>
-                  <div className="pf-history-main">
-                    <div className="pf-history-top">
-                      <span className="pf-history-file">{job.file_name}</span>
-                      <span className={`pf-history-status status-${job.status.toLowerCase()}`}>
-                        {STATUS_LABELS[job.status] || job.status}
-                      </span>
+              {jobs.map((job) => {
+                const machineLabel = job.machine_name || job.machine_id;
+                const locationLabel = job.location_name
+                  ? `${job.location_name}${job.city ? `, ${job.city}` : ""}`
+                  : null;
+                const paymentLabel = job.payment_method
+                  ? PAYMENT_METHOD_LABELS[job.payment_method] || job.payment_method
+                  : null;
+
+                return (
+                  <div key={job.job_id} className="pf-history-item">
+                    <div className="pf-history-icon">
+                      <FileIcon fileName={job.file_name} />
                     </div>
-                    <div className="pf-history-bottom">
-                      <span>{formatDate(job.created_at)}</span>
-                      <span className="pf-history-amount">
-                        {job.amount != null ? `₹${job.amount}` : "—"}
-                      </span>
+                    <div className="pf-history-main">
+                      <div className="pf-history-top">
+                        <span className="pf-history-file">{job.file_name}</span>
+                        <span className={`pf-history-status status-${job.status.toLowerCase()}`}>
+                          {STATUS_LABELS[job.status] || job.status}
+                        </span>
+                      </div>
+
+                      {machineLabel && (
+                        <div
+                          className="pf-history-machine"
+                          style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--ink-2, #8a8f98)", marginTop: 2 }}
+                        >
+                          <MdPrint size={13} />
+                          <span>
+                            {machineLabel}
+                            {locationLabel ? ` · ${locationLabel}` : ""}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="pf-history-bottom">
+                        <span>
+                          {formatDate(job.created_at)}
+                          {paymentLabel ? ` · Paid via ${paymentLabel}` : ""}
+                        </span>
+                        <span className="pf-history-amount">
+                          {job.amount != null ? `₹${job.amount}` : "—"}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
