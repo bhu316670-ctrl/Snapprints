@@ -26,6 +26,7 @@ router.get("/vendors/:vendorId", verifyAdminToken, admin.getVendorDetail);
 
 /* ── Customers ── */
 router.get("/customers", verifyAdminToken, admin.getCustomers);
+router.get("/customers/:customerId", verifyAdminToken, admin.getCustomerDetail);
 
 /* ── Machine ↔ vendor assignment ── */
 router.patch("/machines/:machineId/assign", verifyAdminToken, admin.assignMachineToVendor);

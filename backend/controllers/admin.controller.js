@@ -50,48 +50,6 @@ exports.getStats = async (req, res) => {
 /* ===========================
    CREATE MACHINE
 =========================== */
-// exports.createMachine = async (req, res) => {
-//   try {
-//     const { name, location } = req.body;
-
-//     const [rows] = await db.query(
-//       "SELECT machine_id FROM machines ORDER BY machine_id DESC Limit 1"
-//     );
-
-//     let machineId;
-//     if (rows.length === 0) {
-//       machineId = "MH1000";
-//     } else {
-//       const lastId     = rows[0].machine_id;
-//       const lastNumber = parseInt(lastId.slice(2), 10);
-//       machineId        = "MH" + (lastNumber + 1).toString().padStart(4, "0");
-//     }
-
-//     const apiKey = crypto.randomBytes(32).toString("hex");
-//     const hash   = await bcrypt.hash(apiKey, 10);
-
-//     await db.query(
-//       `INSERT INTO machines
-//        (machine_id, name, location, status, assigned, api_key_hash)
-//        VALUES (?, ?, ?, 'PENDING', FALSE, ?)`,
-//       [machineId, name, location, hash]
-//     );
-
-//     res.json({
-//       success: true,
-//       message: "Machine created. Waiting for device registration.",
-//       credentials: {
-//         MACHINE_ID: machineId,
-//         API_KEY:    apiKey,
-//         // ✅ Fixed: was hardcoded to localhost — now uses Railway public URL
-//         API_BASE:   SERVER_API_BASE,
-//       },
-//     });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ error: "Failed to create machine" });
-//   }
-// };
 exports.createMachine = async (req, res) => {
   try {
     console.log("CREATE MACHINE BODY:", req.body);
@@ -589,10 +547,6 @@ exports.machineReport = async (req, res) => {
     res.status(500).json({ error: "Failed to generate report" });
   }
 };
-/* ═══════════════════════════════════════════════════════════════════════
-   APPEND THIS BLOCK TO YOUR EXISTING controllers/admin.controller.js
-   Requires `bcrypt` — already imported at the top of your file.
-   ═══════════════════════════════════════════════════════════════════════ */
 
 /* ===========================
    CREATE VENDOR
@@ -689,13 +643,20 @@ exports.getVendorDetail = async (req, res) => {
 
 /* ===========================
    LIST CUSTOMERS
+   Includes a quick "needs attention" signal per customer so the admin
+   can scan the list without opening every profile:
+   - problem_jobs: paid-but-never-verified (EXPIRED) or explicitly FAILED
+   - stuck_jobs: OTP verified (PRINTING) but no print/fail confirmation
+     in 15+ minutes — usually means the machine hung or jammed.
 =========================== */
 exports.getCustomers = async (req, res) => {
   try {
     const [customers] = await db.query(`
       SELECT c.id, c.name, c.phone, c.created_at,
         COUNT(p.id) AS total_orders,
-        COALESCE(SUM(CASE WHEN p.status='PRINTED' THEN p.amount ELSE 0 END), 0) AS total_spent
+        COALESCE(SUM(CASE WHEN p.status='PRINTED' THEN p.amount ELSE 0 END), 0) AS total_spent,
+        SUM(CASE WHEN p.status IN ('EXPIRED','FAILED') THEN 1 ELSE 0 END) AS problem_jobs,
+        SUM(CASE WHEN p.status='PRINTING' AND p.updated_at < NOW() - INTERVAL 15 MINUTE THEN 1 ELSE 0 END) AS stuck_jobs
       FROM customers c
       LEFT JOIN print_jobs p ON p.customer_id = c.id
       GROUP BY c.id
@@ -705,6 +666,66 @@ exports.getCustomers = async (req, res) => {
   } catch (err) {
     console.error("GET CUSTOMERS ERROR:", err);
     res.status(500).json({ error: "Failed to fetch customers" });
+  }
+};
+
+/* ===========================
+   CUSTOMER DETAIL — full print job history across every machine
+   they've used, with a computed `flag` per job so the admin can spot
+   refund/investigation candidates at a glance:
+     - PAID_NOT_VERIFIED : payment succeeded but OTP was never entered
+                            before it expired (cron already marks these
+                            EXPIRED — see the cleanup job in server.js)
+     - STUCK_PRINTING     : OTP was verified (job moved to PRINTING) but
+                            there's been no PRINTED/FAILED confirmation
+                            in 15+ minutes — likely a machine/paper issue
+     - FAILED             : explicitly marked failed (refund attempted
+                             automatically if a payment_id existed)
+=========================== */
+exports.getCustomerDetail = async (req, res) => {
+  try {
+    const { customerId } = req.params;
+
+    const [[customer]] = await db.query(
+      `SELECT id, name, phone, created_at FROM customers WHERE id=?`,
+      [customerId]
+    );
+    if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+    const [jobs] = await db.query(`
+      SELECT
+        pj.job_id, pj.machine_id, m.name AS machine_name,
+        pj.file_name, pj.total_pages, pj.copies, pj.color, pj.paper_size, pj.print_side,
+        pj.amount, pj.status, pj.payment_id,
+        pj.created_at, pj.updated_at, pj.printed_at,
+        pjt.otp_verified, pjt.otp_expires_at
+      FROM print_jobs pj
+      LEFT JOIN machines m ON m.machine_id = pj.machine_id
+      LEFT JOIN print_job_tokens pjt ON pjt.job_id = pj.job_id
+      WHERE pj.customer_id = ?
+      ORDER BY pj.created_at DESC
+    `, [customerId]);
+
+    const now = Date.now();
+    const enrichedJobs = jobs.map((j) => {
+      let flag = null;
+      if (j.status === "EXPIRED") {
+        flag = "PAID_NOT_VERIFIED";
+      } else if (j.status === "PRINTING") {
+        const sinceUpdate = j.updated_at ? now - new Date(j.updated_at).getTime() : null;
+        if (sinceUpdate !== null && sinceUpdate > 15 * 60 * 1000) {
+          flag = "STUCK_PRINTING";
+        }
+      } else if (j.status === "FAILED") {
+        flag = "FAILED";
+      }
+      return { ...j, flag };
+    });
+
+    res.json({ customer, jobs: enrichedJobs });
+  } catch (err) {
+    console.error("GET CUSTOMER DETAIL ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch customer detail" });
   }
 };
 

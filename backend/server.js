@@ -552,7 +552,7 @@ app.post("/api/verify-payment", async (req, res) => {
     await connection.query(
       `UPDATE print_jobs
        SET status='PAID',
-           payment_id=?
+           payment_id=?, updated_at=NOW()
        WHERE id=?`,
       [razorpay_payment_id, job.id]
     );
@@ -738,7 +738,7 @@ app.post("/api/kiosk/unlock", verifyMachine, async (req, res) => {
 
     await connection.query(
       `UPDATE print_jobs
-       SET status='PRINTING'
+       SET status='PRINTING', updated_at=NOW()
        WHERE id=?`,
       [job.id]
     );
