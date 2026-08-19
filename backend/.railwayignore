@@ -1,5 +1,0 @@
-uploads/
-node_modules/
-*.env
-payment.env
-.env.local
